@@ -23,7 +23,9 @@ body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:1
 h1{font-family:var(--f-display);font-weight:400;font-size:28px;margin:0;letter-spacing:.01em;text-wrap:balance}
 .sub{color:var(--muted);font-size:13px;margin:2px 0 0}
 .search{position:relative}
-.search input{width:100%;font:inherit;font-size:17px;padding:13px 14px;border:1.5px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink)}
+.gps{position:absolute;right:6px;top:6px;bottom:6px;font:inherit;font-size:14px;font-weight:500;padding:0 12px;border:0;border-radius:7px;background:var(--accent);color:var(--surface);cursor:pointer;z-index:2}
+.gps:disabled{opacity:.6;cursor:wait}
+.search input{padding-right:104px!important;width:100%;font:inherit;font-size:17px;padding:13px 14px;border:1.5px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink)}
 .search input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 .sugg{position:absolute;left:0;right:0;top:calc(100% + 4px);background:var(--surface);border:1px solid var(--line);border-radius:10px;margin:0;padding:4px;list-style:none;z-index:5;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:320px;overflow:auto}
 .sugg li{padding:9px 10px;border-radius:7px;cursor:pointer;display:flex;justify-content:space-between;gap:10px}
@@ -64,6 +66,7 @@ footer{font-size:12px;color:var(--muted)}
   </header>
 
   <div class="search">
+    <button class="gps" id="gps" type="button" aria-label="내 위치로 찾기">◎ 내 위치</button>
     <input id="q" type="search" autocomplete="off" placeholder="역, 동네, 도로명, 저장한 가게 이름" aria-label="기준 위치" aria-autocomplete="list" aria-controls="sugg">
     <ul class="sugg" id="sugg" role="listbox" hidden></ul>
   </div>
@@ -212,6 +215,17 @@ q.addEventListener('keydown',e=>{
   else if(e.key==='Escape')sg.hidden=true});
 sg.addEventListener('mousedown',e=>{const li=e.target.closest('li');if(!li)return;e.preventDefault();const o=opts[+li.id.slice(1)];setCenter({lat:o.lat,lon:o.lon,label:o.label,kind:o.kind})});
 q.addEventListener('blur',()=>setTimeout(()=>sg.hidden=true,150));
+const SITE='https://nr-rrm.github.io/test/kakaomap-nearby/';
+const gpsFail=msg=>{$('status').innerHTML='<span class="err">'+msg+'</span>'};
+$('gps').addEventListener('click',()=>{
+  const b=$('gps');
+  if(!navigator.geolocation||!window.isSecureContext){gpsFail('이 화면에서는 위치를 쓸 수 없습니다. <a href="'+SITE+'" target="_blank" rel="noopener">'+SITE+'</a> 에서 열어 주세요.');return}
+  b.disabled=true;b.textContent='찾는 중…';
+  navigator.geolocation.getCurrentPosition(p=>{b.disabled=false;b.textContent='◎ 내 위치';
+    setCenter({lat:p.coords.latitude,lon:p.coords.longitude,label:'내 위치',kind:'GPS ±'+Math.round(p.coords.accuracy)+'m'});q.value='';store.set('q','')},
+  e=>{b.disabled=false;b.textContent='◎ 내 위치';
+    gpsFail(e.code===1?'위치 권한이 거부됐습니다. 이 화면에서 막혀 있다면 <a href="'+SITE+'" target="_blank" rel="noopener">'+SITE+'</a> 에서 열고, 브라우저 주소창의 권한 설정에서 위치를 허용해 주세요.':'위치를 가져오지 못했습니다. 잠시 후 다시 눌러 주세요.')},
+  {enableHighAccuracy:true,timeout:15000,maximumAge:60000})});
 let t;$('kw').addEventListener('input',e=>{clearTimeout(t);t=setTimeout(()=>{st.kw=e.target.value;st.shown=40;render()},120)});
 
 $('sub').textContent='카카오맵 즐겨찾기 '+P.length.toLocaleString()+'곳 · 폴더 '+FOLDERS.length+'개';
