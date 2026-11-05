@@ -1,0 +1,222 @@
+<title>내 맛집 반경 검색</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@500&family=Do+Hyeon&display=swap">
+<style>
+/* Layout: one narrow column — search bar on top, radar plot, then distance-sorted list */
+:root{
+  --bg:#F3F5F2; --surface:#FFFFFF; --ink:#18201C; --muted:#5E6B64; --line:#D9DFDA;
+  --accent:#1E7353; --accent-soft:#DDEEE6; --pin:#D9443A; --ring:#B9C6BE;
+  --f-display:"Do Hyeon","IBM Plex Sans KR",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans KR",system-ui,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#111613; --surface:#1A211D; --ink:#E6ECE8; --muted:#94A39A; --line:#2C3631;
+  --accent:#4FBF8E; --accent-soft:#1F3A2E; --pin:#FF6B5E; --ring:#3A4A42; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#111613; --surface:#1A211D; --ink:#E6ECE8; --muted:#94A39A; --line:#2C3631;
+  --accent:#4FBF8E; --accent-soft:#1F3A2E; --pin:#FF6B5E; --ring:#3A4A42; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.5}
+.wrap{max-width:720px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 48px;display:flex;flex-direction:column;gap:14px}
+h1{font-family:var(--f-display);font-weight:400;font-size:28px;margin:0;letter-spacing:.01em;text-wrap:balance}
+.sub{color:var(--muted);font-size:13px;margin:2px 0 0}
+.search{position:relative}
+.search input{width:100%;font:inherit;font-size:17px;padding:13px 14px;border:1.5px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink)}
+.search input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.sugg{position:absolute;left:0;right:0;top:calc(100% + 4px);background:var(--surface);border:1px solid var(--line);border-radius:10px;margin:0;padding:4px;list-style:none;z-index:5;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:320px;overflow:auto}
+.sugg li{padding:9px 10px;border-radius:7px;cursor:pointer;display:flex;justify-content:space-between;gap:10px}
+.sugg li[aria-selected="true"],.sugg li:hover{background:var(--accent-soft)}
+.sugg small{color:var(--muted);flex-shrink:0}
+.row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.lbl{font-size:12px;color:var(--muted);letter-spacing:.04em;margin-right:4px;min-width:34px}
+.chip{font:inherit;font-size:13px;padding:5px 11px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--surface)}
+.chip:focus-visible,.sugg li:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.filter{flex:1;min-width:0;font:inherit;font-size:14px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)}
+.status{font-size:14px;color:var(--muted);min-height:21px}
+.status b{color:var(--ink)}
+.err{color:var(--pin)}
+.radar{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+canvas{display:block;width:100%;height:auto;aspect-ratio:1/1;max-height:420px;touch-action:manipulation;cursor:pointer}
+ol.list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;border-top:1px solid var(--line)}
+.item{display:grid;grid-template-columns:62px 1fr;gap:12px;padding:12px 2px;border-bottom:1px solid var(--line)}
+.item.hl{background:var(--accent-soft)}
+.dist{font-family:var(--f-mono);font-size:14px;color:var(--accent);font-variant-numeric:tabular-nums;text-align:right;padding-top:1px}
+.body{min-width:0}
+.name{font-weight:700;font-size:16px;overflow-wrap:anywhere}
+.memo{font-size:14px;margin-top:1px;overflow-wrap:anywhere}
+.meta{font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
+.links{display:flex;gap:14px;margin-top:4px;font-size:13px}
+.links a{color:var(--accent);text-decoration:none;font-weight:500}
+.links a:hover{text-decoration:underline}
+.tag{display:inline-block;font-size:11px;padding:0 6px;border-radius:4px;background:var(--bg);border:1px solid var(--line);color:var(--muted);margin-right:6px}
+.empty{padding:28px 4px;color:var(--muted);text-align:center}
+.more{font:inherit;padding:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;cursor:pointer}
+footer{font-size:12px;color:var(--muted)}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>내 맛집 반경 검색</h1>
+    <p class="sub" id="sub">카카오맵 즐겨찾기 장소</p>
+  </header>
+
+  <div class="search">
+    <input id="q" type="search" autocomplete="off" placeholder="역, 동네, 도로명, 저장한 가게 이름" aria-label="기준 위치" aria-autocomplete="list" aria-controls="sugg">
+    <ul class="sugg" id="sugg" role="listbox" hidden></ul>
+  </div>
+
+  <div class="row" id="radii"><span class="lbl">반경</span></div>
+  <div class="row" id="folders"><span class="lbl">폴더</span></div>
+  <div class="row"><span class="lbl">메모</span><input class="filter" id="kw" type="search" placeholder="예: 냉면, 탕수육 (이름·메모에서 찾기)" aria-label="이름·메모 필터"></div>
+
+  <div class="status" id="status" aria-live="polite"></div>
+  <div class="radar"><canvas id="cv" width="720" height="720" aria-label="기준 위치 주변 장소 분포"></canvas></div>
+  <ol class="list" id="list"></ol>
+  <footer id="foot"></footer>
+</div>
+
+<script id="places" type="application/json">__PLACES__</script>
+<script id="gaz" type="application/json">__GAZ__</script>
+<script>
+(function(){
+const D=JSON.parse(document.getElementById('places').textContent);
+const FOLDERS=D.folders, P=D.places; // place: [name,addr,memo,folderIdx,id,lat,lon,isAddress]
+const GAZ=JSON.parse(document.getElementById('gaz').textContent);
+const $=id=>document.getElementById(id);
+const RADII=[300,500,1000,2000,5000];
+const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+
+// ---- location index: gazetteer + address tokens (median of saved places) + saved place names
+const loc=new Map();
+for(const k in GAZ) loc.set(k,{lat:GAZ[k][0],lon:GAZ[k][1],kind:'지명'});
+const tok=new Map();
+const add=(k,i)=>{if(!tok.has(k))tok.set(k,[]);tok.get(k).push(i)};
+P.forEach((p,i)=>{
+  const a=p[1]; if(!a) return;
+  const m=a.match(/\(([^)]*?(동|가|리))\)/); if(m) add(m[1],i);
+  const w=a.replace(/\(.*?\)/g,'').split(/\s+/);
+  w.forEach((t,j)=>{
+    if(/(구|군|시)$/.test(t)&&j<=2){ add(w.slice(0,j+1).join(' '),i); if(j>0&&/(구|군)$/.test(t)) add(w[j-1]+' '+t,i); }
+    if(/(동|읍|면|로|길)$/.test(t)&&t.length>=2&&j>=1&&j<=3) add(t,i);
+  });
+});
+const med=a=>{a=a.slice().sort((x,y)=>x-y);return a[a.length>>1]};
+for(const [k,ids] of tok){ if(loc.has(k)) continue;
+  loc.set(k,{lat:med(ids.map(i=>P[i][5])),lon:med(ids.map(i=>P[i][6])),kind:'주소 · '+ids.length+'곳'}); }
+const names=new Map(); P.forEach((p,i)=>{ if(!names.has(p[0])) names.set(p[0],i); });
+
+function resolve(q){
+  q=q.trim(); if(!q) return null;
+  const c=q.match(/^(-?\d{1,3}\.\d+)\s*[, ]\s*(-?\d{1,3}\.\d+)$/);
+  if(c){let a=+c[1],b=+c[2]; if(a>90){[a,b]=[b,a]} return {lat:a,lon:b,label:q,kind:'좌표'};}
+  if(loc.has(q)) return {...loc.get(q),label:q};
+  if(loc.has(q+'역')) return {...loc.get(q+'역'),label:q+'역'};
+  if(names.has(q)){const p=P[names.get(q)];return {lat:p[5],lon:p[6],label:q,kind:'저장한 장소'};}
+  const s=suggest(q,1)[0]; return s?{lat:s.lat,lon:s.lon,label:s.label,kind:s.kind}:null;
+}
+function suggest(q,n){
+  q=q.trim(); if(!q) return [];
+  const out=[],seen=new Set();
+  const push=(label,o)=>{if(seen.has(label)||out.length>=n)return;seen.add(label);out.push({label,...o})};
+  const keys=[...loc.keys()];
+  for(const pass of [k=>k===q||k===q+'역',k=>k.startsWith(q),k=>k.includes(q)])
+    for(const k of keys) if(pass(k)) push(k,loc.get(k));
+  for(const [nm,i] of names) if(nm.includes(q)) push(nm,{lat:P[i][5],lon:P[i][6],kind:'저장한 장소'});
+  return out;
+}
+
+// ---- state
+const st={center:null,radius:+(store.get('r')||1000),folders:new Set(FOLDERS.map((_,i)=>i)),kw:'',shown:40,hl:-1,hits:[]};
+try{const f=JSON.parse(store.get('f')||'null'); if(Array.isArray(f)&&f.length) st.folders=new Set(f.filter(i=>i<FOLDERS.length));}catch(e){}
+
+RADII.forEach(r=>{const b=document.createElement('button');b.className='chip';b.type='button';b.textContent=r<1000?r+'m':(r/1000)+'km';b.dataset.r=r;
+  b.onclick=()=>{st.radius=r;store.set('r',r);st.shown=40;render()};$('radii').appendChild(b)});
+FOLDERS.forEach((f,i)=>{const b=document.createElement('button');b.className='chip';b.type='button';b.textContent=f.name+' '+f.count;
+  b.onclick=()=>{st.folders.has(i)?st.folders.delete(i):st.folders.add(i);if(!st.folders.size)FOLDERS.forEach((_,j)=>st.folders.add(j));store.set('f',JSON.stringify([...st.folders]));render()};
+  b.dataset.i=i;$('folders').appendChild(b)});
+
+function hav(a,b,c,d){const R=6371000,r=Math.PI/180,x=(c-a)*r,y=(d-b)*r;const h=Math.sin(x/2)**2+Math.cos(a*r)*Math.cos(c*r)*Math.sin(y/2)**2;return 2*R*Math.asin(Math.sqrt(h))}
+const fmt=m=>m<1000?Math.round(m)+'m':(m/1000).toFixed(m<10000?1:0)+'km';
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function compute(){
+  const c=st.center; if(!c) return [];
+  const kw=st.kw.trim().toLowerCase(), out=[];
+  for(let i=0;i<P.length;i++){const p=P[i]; if(!st.folders.has(p[3])) continue;
+    if(kw&&!(p[0]+' '+p[2]).toLowerCase().includes(kw)) continue;
+    const d=hav(c.lat,c.lon,p[5],p[6]); if(d<=st.radius) out.push([d,i]);}
+  return out.sort((a,b)=>a[0]-b[0]);
+}
+function render(){
+  document.querySelectorAll('#radii .chip').forEach(b=>b.setAttribute('aria-pressed',+b.dataset.r===st.radius));
+  const all=st.folders.size===FOLDERS.length;
+  document.querySelectorAll('#folders .chip').forEach(b=>b.setAttribute('aria-pressed',!all&&st.folders.has(+b.dataset.i)));
+  const s=$('status'), L=$('list');
+  if(!st.center){s.textContent='기준 위치를 입력하세요.';L.innerHTML='';draw();return}
+  st.hits=compute();
+  s.innerHTML='<b>'+esc(st.center.label)+'</b> <span>('+esc(st.center.kind)+')</span> 반경 '+fmt(st.radius)+' 안에 <b>'+st.hits.length+'곳</b>';
+  const c=st.center;
+  L.innerHTML=st.hits.length?st.hits.slice(0,st.shown).map(([d,i],n)=>{const p=P[i];
+    const link=p[7]?'https://map.kakao.com/link/map/'+encodeURIComponent(p[0])+','+p[5]+','+p[6]:'https://place.map.kakao.com/'+p[4];
+    const route='https://map.kakao.com/link/to/'+encodeURIComponent(p[0])+','+p[5]+','+p[6];
+    return '<li class="item'+(st.hl===i?' hl':'')+'" id="it'+i+'"><div class="dist">'+fmt(d)+'</div><div class="body"><div class="name">'+esc(p[0])+'</div>'+
+      (p[2]?'<div class="memo">'+esc(p[2])+'</div>':'')+'<div class="meta"><span class="tag">'+esc(FOLDERS[p[3]].name)+'</span>'+esc(p[1])+'</div>'+
+      '<div class="links"><a href="'+link+'" target="_blank" rel="noopener">카카오맵에서 보기</a><a href="'+route+'" target="_blank" rel="noopener">길찾기</a></div></div></li>'}).join('')
+    :'<li class="empty">이 반경 안에는 저장한 장소가 없습니다. 반경을 넓혀 보세요.</li>';
+  if(st.hits.length>st.shown){const li=document.createElement('li');li.style.padding='12px 0';const b=document.createElement('button');b.className='more';b.type='button';b.style.width='100%';
+    b.textContent='더 보기 ('+(st.hits.length-st.shown)+'곳 남음)';b.onclick=()=>{st.shown+=60;render()};li.appendChild(b);L.appendChild(li);}
+  draw();
+}
+
+// ---- radar canvas
+const cv=$('cv'),ctx=cv.getContext('2d');
+function css(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim()}
+function proj(lat,lon){const c=st.center,W=cv.width,R=st.radius*1.08;const k=(W/2-14)/R;
+  const x=(lon-c.lon)*111320*Math.cos(c.lat*Math.PI/180),y=(lat-c.lat)*110540;return [W/2+x*k,W/2-y*k]}
+function draw(){
+  const W=cv.width; ctx.clearRect(0,0,W,W); ctx.fillStyle=css('--surface');ctx.fillRect(0,0,W,W);
+  ctx.font='500 20px '+css('--f-mono');
+  if(!st.center){ctx.fillStyle=css('--muted');ctx.textAlign='center';ctx.fillText('기준 위치를 입력하세요',W/2,W/2);return}
+  const R=W/2-14, k=R/(st.radius*1.08);
+  ctx.strokeStyle=css('--ring');ctx.lineWidth=1.5;ctx.fillStyle=css('--muted');ctx.textAlign='left';
+  [.25,.5,.75,1].forEach(f=>{const r=st.radius*f*k;ctx.beginPath();ctx.setLineDash(f===1?[]:[6,6]);ctx.arc(W/2,W/2,r,0,7);ctx.stroke();
+    ctx.fillText(fmt(st.radius*f),W/2+r*.7071+4,W/2-r*.7071-4)});
+  ctx.setLineDash([]);
+  ctx.fillStyle=css('--accent');ctx.globalAlpha=.85;
+  for(const [,i] of st.hits){if(i===st.hl)continue;const [x,y]=proj(P[i][5],P[i][6]);ctx.beginPath();ctx.arc(x,y,6,0,7);ctx.fill()}
+  ctx.globalAlpha=1;
+  if(st.hl>=0){const p=P[st.hl],[x,y]=proj(p[5],p[6]);ctx.fillStyle=css('--pin');ctx.beginPath();ctx.arc(x,y,10,0,7);ctx.fill();
+    ctx.font='700 22px '+css('--f-body');ctx.fillStyle=css('--ink');ctx.textAlign=x>W*.6?'right':'left';ctx.fillText(p[0],x+(x>W*.6?-14:14),y+7)}
+  ctx.strokeStyle=css('--ink');ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(W/2-12,W/2);ctx.lineTo(W/2+12,W/2);ctx.moveTo(W/2,W/2-12);ctx.lineTo(W/2,W/2+12);ctx.stroke();
+}
+cv.addEventListener('click',e=>{if(!st.center||!st.hits.length)return;const r=cv.getBoundingClientRect(),s=cv.width/r.width;const mx=(e.clientX-r.left)*s,my=(e.clientY-r.top)*s;
+  let best=-1,bd=40*40,rank=0;st.hits.forEach(([,i],n)=>{const [x,y]=proj(P[i][5],P[i][6]);const d=(x-mx)**2+(y-my)**2;if(d<bd){bd=d;best=i;rank=n}});
+  if(best<0)return;st.hl=best;if(rank>=st.shown)st.shown=rank+20;render();const el=$('it'+best);if(el)el.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'center'})});
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change',draw);
+new MutationObserver(draw).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+
+// ---- search box
+const q=$('q'),sg=$('sugg');let opts=[],sel=-1;
+function setCenter(o){st.center=o;st.hl=-1;st.shown=40;q.value=o.label;store.set('q',o.label);sg.hidden=true;render()}
+function showSugg(){opts=suggest(q.value,8);sel=-1;if(!opts.length){sg.hidden=true;return}
+  sg.innerHTML=opts.map((o,n)=>'<li role="option" id="o'+n+'" aria-selected="false"><span>'+esc(o.label)+'</span><small>'+esc(o.kind)+'</small></li>').join('');sg.hidden=false}
+q.addEventListener('input',showSugg);
+q.addEventListener('keydown',e=>{
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){if(sg.hidden)return;e.preventDefault();sel=(sel+(e.key==='ArrowDown'?1:-1)+opts.length)%opts.length;
+    [...sg.children].forEach((li,n)=>li.setAttribute('aria-selected',n===sel))}
+  else if(e.key==='Enter'){e.preventDefault();const o=sel>=0?opts[sel]:resolve(q.value);
+    if(o)setCenter({lat:o.lat,lon:o.lon,label:o.label,kind:o.kind});else{sg.hidden=true;$('status').innerHTML='<span class="err">“'+esc(q.value)+'”을(를) 찾지 못했습니다. 역 이름, 동 이름(예: 방배동), 도로명, 또는 “37.497, 127.027” 좌표로 입력해 보세요.</span>'}}
+  else if(e.key==='Escape')sg.hidden=true});
+sg.addEventListener('mousedown',e=>{const li=e.target.closest('li');if(!li)return;e.preventDefault();const o=opts[+li.id.slice(1)];setCenter({lat:o.lat,lon:o.lon,label:o.label,kind:o.kind})});
+q.addEventListener('blur',()=>setTimeout(()=>sg.hidden=true,150));
+let t;$('kw').addEventListener('input',e=>{clearTimeout(t);t=setTimeout(()=>{st.kw=e.target.value;st.shown=40;render()},120)});
+
+$('sub').textContent='카카오맵 즐겨찾기 '+P.length.toLocaleString()+'곳 · 폴더 '+FOLDERS.length+'개';
+$('foot').textContent='데이터 기준: '+D.updated+' · 위치 검색은 역·동네 지명과 저장한 장소의 주소로 찾습니다.';
+const init=store.get('q')||'강남역';const o=resolve(init)||resolve('강남역');
+if(o)setCenter({lat:o.lat,lon:o.lon,label:o.label||init,kind:o.kind});else render();
+})();
+</script>
