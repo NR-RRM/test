@@ -6,7 +6,7 @@
 - 좌표가 없는 장소는 카카오 내부 좌표(WCONGNAMUL)를 위경도로 변환합니다.
 - 결과: data/places.json, index.html (artifact 용 본문은 dist/artifact.html)
 """
-import json, re, sys, time, datetime, urllib.request, urllib.parse
+import csv, json, re, sys, time, datetime, urllib.request, urllib.parse
 from pathlib import Path
 from pyproj import Transformer
 
@@ -70,7 +70,15 @@ def build(data=None):
     rev_path = ROOT / "data/reviews.json"
     if rev_path.exists():
         rev = json.loads(rev_path.read_text())
-        data = {**data, "places": [p[:8] + (rev[p[4]] if rev.get(p[4]) else [0, 0, 0, 1] if p[4] in rev else []) for p in data["places"]]}
+        # 카카오맵에 정보가 없는(폐업·삭제) 장소는 빼고, 목록을 data/removed.csv 로 남김
+        gone = [p for p in data["places"] if p[4] in rev and rev[p[4]] is None]
+        keep = [p[:8] + (rev.get(p[4]) or []) for p in data["places"] if not (p[4] in rev and rev[p[4]] is None)]
+        folders = [{**f, "count": sum(1 for p in keep if p[3] == i)} for i, f in enumerate(data["folders"])]
+        data = {**data, "folders": folders, "places": keep}
+        with open(ROOT / "data/removed.csv", "w", newline="", encoding="utf-8-sig") as fp:
+            w = csv.writer(fp); w.writerow(["폴더", "이름", "주소", "메모", "카카오 장소 ID"])
+            for p in gone: w.writerow([folders[p[3]]["name"], p[0], p[1], p[2], p[4]])
+        print("카카오맵에 정보 없는 장소", len(gone), "곳 제외 → data/removed.csv")
     leaflet_css = (ROOT / "vendor/leaflet.css").read_text()
     body = (ROOT / "template.html").read_text()
     body = body.replace("__PLACES__", json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/"))
