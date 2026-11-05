@@ -2,21 +2,22 @@
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@500&family=Do+Hyeon&display=swap">
+<style>__LEAFLET_CSS__</style>
 <style>
 /* Layout: one narrow column — search bar on top, radar plot, then distance-sorted list */
 :root{
   --bg:#F3F5F2; --surface:#FFFFFF; --ink:#18201C; --muted:#5E6B64; --line:#D9DFDA;
-  --accent:#1E7353; --accent-soft:#DDEEE6; --pin:#D9443A; --ring:#B9C6BE;
+  --accent:#1E7353; --accent-soft:#DDEEE6; --pin:#D9443A; --ring:#B9C6BE; --star:#C47A00;
   --f-display:"Do Hyeon","IBM Plex Sans KR",system-ui,sans-serif;
   --f-body:"IBM Plex Sans KR",system-ui,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;
   --f-mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --bg:#111613; --surface:#1A211D; --ink:#E6ECE8; --muted:#94A39A; --line:#2C3631;
-  --accent:#4FBF8E; --accent-soft:#1F3A2E; --pin:#FF6B5E; --ring:#3A4A42; color-scheme:dark}}
+  --accent:#4FBF8E; --accent-soft:#1F3A2E; --pin:#FF6B5E; --ring:#3A4A42; --star:#F2B544; color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#111613; --surface:#1A211D; --ink:#E6ECE8; --muted:#94A39A; --line:#2C3631;
-  --accent:#4FBF8E; --accent-soft:#1F3A2E; --pin:#FF6B5E; --ring:#3A4A42; color-scheme:dark}
+  --accent:#4FBF8E; --accent-soft:#1F3A2E; --pin:#FF6B5E; --ring:#3A4A42; --star:#F2B544; color-scheme:dark}
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.5}
 .wrap{max-width:720px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 48px;display:flex;flex-direction:column;gap:14px}
@@ -41,6 +42,17 @@ h1{font-family:var(--f-display);font-weight:400;font-size:28px;margin:0;letter-s
 .status b{color:var(--ink)}
 .err{color:var(--pin)}
 .radar{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+#map{height:min(62vh,460px);background:var(--bg);font-family:var(--f-body)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) #map .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.9) contrast(.9)}}
+:root[data-theme="dark"] #map .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.9) contrast(.9)}
+#map .leaflet-popup-content-wrapper,#map .leaflet-popup-tip{background:var(--surface);color:var(--ink)}
+#map .leaflet-popup-content{margin:10px 12px;font-size:13px;line-height:1.45}
+#map .leaflet-control-attribution{background:var(--surface);color:var(--muted)}
+#map .leaflet-control-attribution a{color:var(--muted)}
+#map .leaflet-bar a{background:var(--surface);color:var(--ink);border-color:var(--line)}
+.maphint{font-size:12px;color:var(--muted);padding:6px 10px;border-top:1px solid var(--line)}
+.score{font-size:13px;margin-top:2px;font-variant-numeric:tabular-nums;color:var(--muted)}
+.score b{color:var(--star);font-weight:700}
 canvas{display:block;width:100%;height:auto;aspect-ratio:1/1;max-height:420px;touch-action:manipulation;cursor:pointer}
 ol.list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;border-top:1px solid var(--line)}
 .item{display:grid;grid-template-columns:62px 1fr;gap:12px;padding:12px 2px;border-bottom:1px solid var(--line)}
@@ -73,14 +85,16 @@ footer{font-size:12px;color:var(--muted)}
 
   <div class="row" id="radii"><span class="lbl">반경</span></div>
   <div class="row" id="folders"><span class="lbl">폴더</span></div>
+  <div class="row" id="sorts"><span class="lbl">정렬</span></div>
   <div class="row"><span class="lbl">메모</span><input class="filter" id="kw" type="search" placeholder="예: 냉면, 탕수육 (이름·메모에서 찾기)" aria-label="이름·메모 필터"></div>
 
   <div class="status" id="status" aria-live="polite"></div>
-  <div class="radar"><canvas id="cv" width="720" height="720" aria-label="기준 위치 주변 장소 분포"></canvas></div>
+  <div class="radar"><div id="map" hidden></div><canvas id="cv" width="720" height="720" aria-label="기준 위치 주변 장소 분포"></canvas><div class="maphint" id="maphint" hidden>지도를 길게 누르거나 더블클릭하면 그 지점을 기준으로 다시 찾습니다.</div></div>
   <ol class="list" id="list"></ol>
   <footer id="foot"></footer>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script id="places" type="application/json">__PLACES__</script>
 <script id="gaz" type="application/json">__GAZ__</script>
 <script>
@@ -132,11 +146,15 @@ function suggest(q,n){
 }
 
 // ---- state
-const st={center:null,radius:+(store.get('r')||1000),folders:new Set(FOLDERS.map((_,i)=>i)),kw:'',shown:40,hl:-1,hits:[]};
+const SORTS=[['dist','거리순'],['score','별점순'],['reviews','리뷰 많은 순']];
+const HAS_REV=P.some(p=>p.length>8);
+const st={sort:store.get('s')||'dist',center:null,radius:+(store.get('r')||1000),folders:new Set(FOLDERS.map((_,i)=>i)),kw:'',shown:40,hl:-1,hits:[]};
 try{const f=JSON.parse(store.get('f')||'null'); if(Array.isArray(f)&&f.length) st.folders=new Set(f.filter(i=>i<FOLDERS.length));}catch(e){}
 
 RADII.forEach(r=>{const b=document.createElement('button');b.className='chip';b.type='button';b.textContent=r<1000?r+'m':(r/1000)+'km';b.dataset.r=r;
   b.onclick=()=>{st.radius=r;store.set('r',r);st.shown=40;render()};$('radii').appendChild(b)});
+if(HAS_REV) SORTS.forEach(([k,label])=>{const b=document.createElement('button');b.className='chip';b.type='button';b.textContent=label;b.dataset.s=k;
+  b.onclick=()=>{st.sort=k;store.set('s',k);st.shown=40;render()};$('sorts').appendChild(b)}); else $('sorts').hidden=true;
 FOLDERS.forEach((f,i)=>{const b=document.createElement('button');b.className='chip';b.type='button';b.textContent=f.name+' '+f.count;
   b.onclick=()=>{st.folders.has(i)?st.folders.delete(i):st.folders.add(i);if(!st.folders.size)FOLDERS.forEach((_,j)=>st.folders.add(j));store.set('f',JSON.stringify([...st.folders]));render()};
   b.dataset.i=i;$('folders').appendChild(b)});
@@ -151,10 +169,20 @@ function compute(){
   for(let i=0;i<P.length;i++){const p=P[i]; if(!st.folders.has(p[3])) continue;
     if(kw&&!(p[0]+' '+p[2]).toLowerCase().includes(kw)) continue;
     const d=hav(c.lat,c.lon,p[5],p[6]); if(d<=st.radius) out.push([d,i]);}
+  const sc=i=>P[i][8]||0, rv=i=>P[i][9]||0;
+  // 별점순: 리뷰 5개 미만은 별점이 불안정하므로 뒤로
+  if(st.sort==='score') return out.sort((a,b)=>((rv(b[1])>=5)-(rv(a[1])>=5))||sc(b[1])-sc(a[1])||rv(b[1])-rv(a[1])||a[0]-b[0]);
+  if(st.sort==='reviews') return out.sort((a,b)=>rv(b[1])-rv(a[1])||a[0]-b[0]);
   return out.sort((a,b)=>a[0]-b[0]);
+}
+function scoreHtml(p){
+  if(p.length<=8) return '';
+  if(!p[9]&&!p[10]) return '<div class="score">아직 리뷰 없음</div>';
+  return '<div class="score">'+(p[9]?'<b>★ '+(+p[8]).toFixed(1)+'</b> · 리뷰 '+p[9].toLocaleString():'카카오 리뷰 없음')+(p[10]?' · 블로그 '+p[10].toLocaleString():'')+'</div>';
 }
 function render(){
   document.querySelectorAll('#radii .chip').forEach(b=>b.setAttribute('aria-pressed',+b.dataset.r===st.radius));
+  document.querySelectorAll('#sorts .chip').forEach(b=>b.setAttribute('aria-pressed',b.dataset.s===st.sort));
   const all=st.folders.size===FOLDERS.length;
   document.querySelectorAll('#folders .chip').forEach(b=>b.setAttribute('aria-pressed',!all&&st.folders.has(+b.dataset.i)));
   const s=$('status'), L=$('list');
@@ -165,7 +193,7 @@ function render(){
   L.innerHTML=st.hits.length?st.hits.slice(0,st.shown).map(([d,i],n)=>{const p=P[i];
     const link=p[7]?'https://map.kakao.com/link/map/'+encodeURIComponent(p[0])+','+p[5]+','+p[6]:'https://place.map.kakao.com/'+p[4];
     const route='https://map.kakao.com/link/to/'+encodeURIComponent(p[0])+','+p[5]+','+p[6];
-    return '<li class="item'+(st.hl===i?' hl':'')+'" id="it'+i+'"><div class="dist">'+fmt(d)+'</div><div class="body"><div class="name">'+esc(p[0])+'</div>'+
+    return '<li class="item'+(st.hl===i?' hl':'')+'" id="it'+i+'"><div class="dist">'+fmt(d)+'</div><div class="body"><div class="name">'+esc(p[0])+'</div>'+scoreHtml(p)+
       (p[2]?'<div class="memo">'+esc(p[2])+'</div>':'')+'<div class="meta"><span class="tag">'+esc(FOLDERS[p[3]].name)+'</span>'+esc(p[1])+'</div>'+
       '<div class="links"><a href="'+link+'" target="_blank" rel="noopener">카카오맵에서 보기</a><a href="'+route+'" target="_blank" rel="noopener">길찾기</a></div></div></li>'}).join('')
     :'<li class="empty">이 반경 안에는 저장한 장소가 없습니다. 반경을 넓혀 보세요.</li>';
@@ -179,7 +207,44 @@ const cv=$('cv'),ctx=cv.getContext('2d');
 function css(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim()}
 function proj(lat,lon){const c=st.center,W=cv.width,R=st.radius*1.08;const k=(W/2-14)/R;
   const x=(lon-c.lon)*111320*Math.cos(c.lat*Math.PI/180),y=(lat-c.lat)*110540;return [W/2+x*k,W/2-y*k]}
+// ---- real map (Leaflet + OpenStreetMap). Falls back to the canvas plot when tiles can't load.
+let map=null,layer=null,mapOK=false;
+function linkFor(p){return p[7]?'https://map.kakao.com/link/map/'+encodeURIComponent(p[0])+','+p[5]+','+p[6]:'https://place.map.kakao.com/'+p[4]}
+function initMap(){
+  if(!window.L) return;
+  $('map').hidden=false;cv.hidden=true;
+  map=L.map('map',{zoomControl:true,doubleClickZoom:false,attributionControl:true});
+  const tiles=L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>'});
+  let loaded=false,failed=0;
+  tiles.on('tileload',()=>{if(!loaded){loaded=mapOK=true;cv.hidden=true;$('maphint').hidden=false;draw()}});
+  tiles.on('tileerror',()=>{if(!loaded&&++failed>=2) fallback()});
+  setTimeout(()=>{if(!loaded) fallback()},6000);
+  tiles.addTo(map); layer=L.layerGroup().addTo(map);
+  const pick=e=>setCenter({lat:e.latlng.lat,lon:e.latlng.lng,label:'지도에서 고른 위치',kind:e.latlng.lat.toFixed(5)+', '+e.latlng.lng.toFixed(5)});
+  map.on('dblclick',pick); map.on('contextmenu',pick);
+  map.setView(st.center?[st.center.lat,st.center.lon]:[37.5665,126.978],15);
+}
+function fallback(){if(mapOK)return;if(map){map.remove();map=null}$('map').hidden=true;$('maphint').hidden=true;cv.hidden=false;draw()}
+let lastView='';
+function drawMap(){
+  const c=st.center; layer.clearLayers(); if(!c) return;
+  const ac=css('--accent'),pin=css('--pin'),ink=css('--ink'),bg=css('--surface');
+  const circle=L.circle([c.lat,c.lon],{radius:st.radius,color:ac,weight:1.5,fillColor:ac,fillOpacity:.06,interactive:false}).addTo(layer);
+  L.circleMarker([c.lat,c.lon],{radius:7,color:bg,weight:3,fillColor:ink,fillOpacity:1,interactive:false}).addTo(layer);
+  for(const [d,i] of st.hits){const p=P[i],h=i===st.hl;
+    const m=L.circleMarker([p[5],p[6]],{radius:h?10:7,color:bg,weight:2,fillColor:h?pin:ac,fillOpacity:.95}).addTo(layer);
+    m.bindPopup('<b>'+esc(p[0])+'</b> · '+fmt(d)+(p[9]?'<br>★ '+(+p[8]).toFixed(1)+' · 리뷰 '+p[9]:'')+(p[2]?'<br>'+esc(p[2]):'')+'<br><a href="'+linkFor(p)+'" target="_blank" rel="noopener">카카오맵에서 보기</a>');
+    m.on('click',()=>focusItem(i,false)); if(h) m.bringToFront();}
+  const v=c.lat+','+c.lon+','+st.radius;
+  if(v!==lastView){lastView=v;map.fitBounds(circle.getBounds(),{padding:[8,8]})}
+}
+function focusItem(i,fromList){
+  const rank=st.hits.findIndex(h=>h[1]===i); if(rank<0)return;
+  st.hl=i; if(rank>=st.shown) st.shown=rank+20; render();
+  const el=$('it'+i); if(el&&!fromList) el.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'center'});
+}
 function draw(){
+  if(map&&mapOK){map.invalidateSize();drawMap();return}
   const W=cv.width; ctx.clearRect(0,0,W,W); ctx.fillStyle=css('--surface');ctx.fillRect(0,0,W,W);
   ctx.font='500 20px '+css('--f-mono');
   if(!st.center){ctx.fillStyle=css('--muted');ctx.textAlign='center';ctx.fillText('기준 위치를 입력하세요',W/2,W/2);return}
@@ -230,6 +295,7 @@ let t;$('kw').addEventListener('input',e=>{clearTimeout(t);t=setTimeout(()=>{st.
 
 $('sub').textContent='카카오맵 즐겨찾기 '+P.length.toLocaleString()+'곳 · 폴더 '+FOLDERS.length+'개';
 $('foot').textContent='데이터 기준: '+D.updated+' · 위치 검색은 역·동네 지명과 저장한 장소의 주소로 찾습니다.';
+initMap();
 const init=store.get('q')||'강남역';const o=resolve(init)||resolve('강남역');
 if(o)setCenter({lat:o.lat,lon:o.lon,label:o.label||init,kind:o.kind});else render();
 })();

@@ -62,12 +62,19 @@ def main():
     (ROOT / "data").mkdir(exist_ok=True)
     (ROOT / "data/places.json").write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")))
     build(data)
+    print("별점·리뷰 수를 갱신하려면: python3 reviews.py && python3 update.py --build-only")
 
 def build(data=None):
     data = data or json.loads((ROOT / "data/places.json").read_text())
     gaz = (ROOT / "data/gazetteer.json").read_text()
+    rev_path = ROOT / "data/reviews.json"
+    if rev_path.exists():
+        rev = json.loads(rev_path.read_text())
+        data = {**data, "places": [p[:8] + (rev.get(p[4]) or []) for p in data["places"]]}
+    leaflet_css = (ROOT / "vendor/leaflet.css").read_text()
     body = (ROOT / "template.html").read_text()
     body = body.replace("__PLACES__", json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/"))
+    body = body.replace("__LEAFLET_CSS__", leaflet_css)
     body = body.replace("__GAZ__", gaz.replace("</", "<\\/"))
     (ROOT / "dist").mkdir(exist_ok=True)
     (ROOT / "dist/artifact.html").write_text(body)
