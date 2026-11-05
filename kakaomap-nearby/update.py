@@ -62,7 +62,7 @@ def main():
     (ROOT / "data").mkdir(exist_ok=True)
     (ROOT / "data/places.json").write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")))
     build(data)
-    print("별점·리뷰 수를 갱신하려면: python3 reviews.py && python3 update.py --build-only")
+    print("별점·리뷰·협찬을 갱신하려면: python3 reviews.py && python3 sponsor.py && python3 update.py --build-only")
 
 def build(data=None):
     data = data or json.loads((ROOT / "data/places.json").read_text())
@@ -72,7 +72,11 @@ def build(data=None):
         rev = json.loads(rev_path.read_text())
         # 카카오맵에 정보가 없는(폐업·삭제) 장소는 빼고, 목록을 data/removed.csv 로 남김
         gone = [p for p in data["places"] if p[4] in rev and rev[p[4]] is None]
-        keep = [p[:8] + (rev.get(p[4]) or []) for p in data["places"] if not (p[4] in rev and rev[p[4]] is None)]
+        sp_path = ROOT / "data/sponsor.json"
+        sp = json.loads(sp_path.read_text()) if sp_path.exists() else {}
+        # [이름,주소,메모,폴더,ID,위도,경도,주소형, 별점,리뷰수,블로그수, 확인한 블로그 글,협찬 글]
+        keep = [p[:8] + (rev.get(p[4]) or [None, None, None]) + (sp.get(p[4]) or [0, 0])
+                for p in data["places"] if not (p[4] in rev and rev[p[4]] is None)]
         folders = [{**f, "count": sum(1 for p in keep if p[3] == i)} for i, f in enumerate(data["folders"])]
         data = {**data, "folders": folders, "places": keep}
         with open(ROOT / "data/removed.csv", "w", newline="", encoding="utf-8-sig") as fp:

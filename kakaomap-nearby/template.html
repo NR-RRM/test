@@ -53,6 +53,8 @@ h1{font-family:var(--f-display);font-weight:400;font-size:28px;margin:0;letter-s
 .maphint{font-size:12px;color:var(--muted);padding:6px 10px;border-top:1px solid var(--line)}
 .score{font-size:13px;margin-top:2px;font-variant-numeric:tabular-nums;color:var(--muted)}
 .score b{color:var(--star);font-weight:700}
+.sp{color:var(--muted)}
+.sp.many{color:var(--pin);font-weight:700}
 canvas{display:block;width:100%;height:auto;aspect-ratio:1/1;max-height:420px;touch-action:manipulation;cursor:pointer}
 ol.list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;border-top:1px solid var(--line)}
 .item{display:grid;grid-template-columns:62px 1fr;gap:12px;padding:12px 2px;border-bottom:1px solid var(--line)}
@@ -84,7 +86,7 @@ footer{font-size:12px;color:var(--muted)}
   </div>
 
   <div class="row" id="radii"><span class="lbl">반경</span></div>
-  <div class="row" id="folders"><span class="lbl">폴더</span></div>
+  <div class="row" id="spons"><span class="lbl">협찬</span></div>
   <div class="row" id="sorts"><span class="lbl">정렬</span></div>
   <div class="row"><span class="lbl">메모</span><input class="filter" id="kw" type="search" placeholder="예: 냉면, 탕수육 (이름·메모에서 찾기)" aria-label="이름·메모 필터"></div>
 
@@ -100,7 +102,7 @@ footer{font-size:12px;color:var(--muted)}
 <script>
 (function(){
 const D=JSON.parse(document.getElementById('places').textContent);
-const FOLDERS=D.folders, P=D.places; // place: [name,addr,memo,folderIdx,id,lat,lon,isAddress]
+const FOLDERS=D.folders, P=D.places; // place: [name,addr,memo,folderIdx,id,lat,lon,isAddress,score,reviews,blogs,blogsChecked,blogsSponsored]
 const GAZ=JSON.parse(document.getElementById('gaz').textContent);
 const $=id=>document.getElementById(id);
 const RADII=[300,500,1000,2000,5000];
@@ -147,17 +149,16 @@ function suggest(q,n){
 
 // ---- state
 const SORTS=[['dist','거리순'],['score','별점순'],['reviews','리뷰 많은 순']];
-const HAS_REV=P.some(p=>p.length>8);
-const st={sort:store.get('s')||'dist',center:null,radius:+(store.get('r')||1000),folders:new Set(FOLDERS.map((_,i)=>i)),kw:'',shown:40,hl:-1,hits:[]};
-try{const f=JSON.parse(store.get('f')||'null'); if(Array.isArray(f)&&f.length) st.folders=new Set(f.filter(i=>i<FOLDERS.length));}catch(e){}
+const HAS_REV=P.some(p=>p[8]!=null), HAS_SP=P.some(p=>p[11]>0);
+const SPONS=[['all','모두 보기'],['many','협찬 많은 곳 숨기기'],['any','협찬 있으면 숨기기']];
+const st={sort:store.get('s')||'dist',center:null,radius:+(store.get('r')||1000),spons:store.get('sp')||'all',kw:'',shown:40,hl:-1,hits:[]};
 
 RADII.forEach(r=>{const b=document.createElement('button');b.className='chip';b.type='button';b.textContent=r<1000?r+'m':(r/1000)+'km';b.dataset.r=r;
   b.onclick=()=>{st.radius=r;store.set('r',r);st.shown=40;render()};$('radii').appendChild(b)});
 if(HAS_REV) SORTS.forEach(([k,label])=>{const b=document.createElement('button');b.className='chip';b.type='button';b.textContent=label;b.dataset.s=k;
   b.onclick=()=>{st.sort=k;store.set('s',k);st.shown=40;render()};$('sorts').appendChild(b)}); else $('sorts').hidden=true;
-FOLDERS.forEach((f,i)=>{const b=document.createElement('button');b.className='chip';b.type='button';b.textContent=f.name+' '+f.count;
-  b.onclick=()=>{st.folders.has(i)?st.folders.delete(i):st.folders.add(i);if(!st.folders.size)FOLDERS.forEach((_,j)=>st.folders.add(j));store.set('f',JSON.stringify([...st.folders]));render()};
-  b.dataset.i=i;$('folders').appendChild(b)});
+if(HAS_SP) SPONS.forEach(([k,label])=>{const b=document.createElement('button');b.className='chip';b.type='button';b.textContent=label;b.dataset.k=k;
+  b.onclick=()=>{st.spons=k;store.set('sp',k);st.shown=40;render()};$('spons').appendChild(b)}); else $('spons').hidden=true;
 
 function hav(a,b,c,d){const R=6371000,r=Math.PI/180,x=(c-a)*r,y=(d-b)*r;const h=Math.sin(x/2)**2+Math.cos(a*r)*Math.cos(c*r)*Math.sin(y/2)**2;return 2*R*Math.asin(Math.sqrt(h))}
 const fmt=m=>m<1000?Math.round(m)+'m':(m/1000).toFixed(m<10000?1:0)+'km';
@@ -166,7 +167,7 @@ const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',
 function compute(){
   const c=st.center; if(!c) return [];
   const kw=st.kw.trim().toLowerCase(), out=[];
-  for(let i=0;i<P.length;i++){const p=P[i]; if(!st.folders.has(p[3])) continue;
+  for(let i=0;i<P.length;i++){const p=P[i]; if(st.spons!=='all'&&p[12]>=(st.spons==='many'?SP_MANY:1)) continue;
     if(kw&&!(p[0]+' '+p[2]).toLowerCase().includes(kw)) continue;
     const d=hav(c.lat,c.lon,p[5],p[6]); if(d<=st.radius) out.push([d,i]);}
   const sc=i=>P[i][8]||0, rv=i=>P[i][9]||0;
@@ -175,17 +176,17 @@ function compute(){
   if(st.sort==='reviews') return out.sort((a,b)=>rv(b[1])-rv(a[1])||a[0]-b[0]);
   return out.sort((a,b)=>a[0]-b[0]);
 }
+const SP_MANY=3; // 최근 블로그 글 10개 중 이 개수 이상이 협찬이면 '협찬 많은 곳'
+function spHtml(p){return p[11]?' · <span class="'+(p[12]>=SP_MANY?'sp many':p[12]?'sp':'sp none')+'">협찬 '+p[12]+'/'+p[11]+'</span>':''}
 function scoreHtml(p){
-  if(p.length<=8) return '';
-  if(p[11]) return '<div class="score">카카오맵에 정보 없음 (폐업했을 수 있음)</div>';
+  if(p[8]==null) return '';
   if(!p[9]&&!p[10]) return '<div class="score">아직 리뷰 없음</div>';
-  return '<div class="score">'+(p[9]?'<b>★ '+(+p[8]).toFixed(1)+'</b> · 리뷰 '+p[9].toLocaleString():'카카오 리뷰 없음')+(p[10]?' · 블로그 '+p[10].toLocaleString():'')+'</div>';
+  return '<div class="score">'+(p[9]?'<b>★ '+(+p[8]).toFixed(1)+'</b> · 리뷰 '+p[9].toLocaleString():'카카오 리뷰 없음')+(p[10]?' · 블로그 '+p[10].toLocaleString():'')+spHtml(p)+'</div>';
 }
 function render(){
   document.querySelectorAll('#radii .chip').forEach(b=>b.setAttribute('aria-pressed',+b.dataset.r===st.radius));
   document.querySelectorAll('#sorts .chip').forEach(b=>b.setAttribute('aria-pressed',b.dataset.s===st.sort));
-  const all=st.folders.size===FOLDERS.length;
-  document.querySelectorAll('#folders .chip').forEach(b=>b.setAttribute('aria-pressed',!all&&st.folders.has(+b.dataset.i)));
+  document.querySelectorAll('#spons .chip').forEach(b=>b.setAttribute('aria-pressed',b.dataset.k===st.spons));
   const s=$('status'), L=$('list');
   if(!st.center){s.textContent='기준 위치를 입력하세요.';L.innerHTML='';draw();return}
   st.hits=compute();
@@ -195,7 +196,7 @@ function render(){
     const link=p[7]?'https://map.kakao.com/link/map/'+encodeURIComponent(p[0])+','+p[5]+','+p[6]:'https://place.map.kakao.com/'+p[4];
     const route='https://map.kakao.com/link/to/'+encodeURIComponent(p[0])+','+p[5]+','+p[6];
     return '<li class="item'+(st.hl===i?' hl':'')+'" id="it'+i+'"><div class="dist">'+fmt(d)+'</div><div class="body"><div class="name">'+esc(p[0])+'</div>'+scoreHtml(p)+
-      (p[2]?'<div class="memo">'+esc(p[2])+'</div>':'')+'<div class="meta"><span class="tag">'+esc(FOLDERS[p[3]].name)+'</span>'+esc(p[1])+'</div>'+
+      (p[2]?'<div class="memo">'+esc(p[2])+'</div>':'')+'<div class="meta">'+esc(p[1])+'</div>'+
       '<div class="links"><a href="'+link+'" target="_blank" rel="noopener">카카오맵에서 보기</a><a href="'+route+'" target="_blank" rel="noopener">길찾기</a></div></div></li>'}).join('')
     :'<li class="empty">이 반경 안에는 저장한 장소가 없습니다. 반경을 넓혀 보세요.</li>';
   if(st.hits.length>st.shown){const li=document.createElement('li');li.style.padding='12px 0';const b=document.createElement('button');b.className='more';b.type='button';b.style.width='100%';
@@ -234,7 +235,7 @@ function drawMap(){
   L.circleMarker([c.lat,c.lon],{radius:7,color:bg,weight:3,fillColor:ink,fillOpacity:1,interactive:false}).addTo(layer);
   for(const [d,i] of st.hits){const p=P[i],h=i===st.hl;
     const m=L.circleMarker([p[5],p[6]],{radius:h?10:7,color:bg,weight:2,fillColor:h?pin:ac,fillOpacity:.95}).addTo(layer);
-    m.bindPopup('<b>'+esc(p[0])+'</b> · '+fmt(d)+(p[9]?'<br>★ '+(+p[8]).toFixed(1)+' · 리뷰 '+p[9]:'')+(p[2]?'<br>'+esc(p[2]):'')+'<br><a href="'+linkFor(p)+'" target="_blank" rel="noopener">카카오맵에서 보기</a>');
+    m.bindPopup('<b>'+esc(p[0])+'</b> · '+fmt(d)+(p[9]?'<br>★ '+(+p[8]).toFixed(1)+' · 리뷰 '+p[9]:'')+(p[12]?' · 협찬 '+p[12]+'/'+p[11]:'')+(p[2]?'<br>'+esc(p[2]):'')+'<br><a href="'+linkFor(p)+'" target="_blank" rel="noopener">카카오맵에서 보기</a>');
     m.on('click',()=>focusItem(i,false)); if(h) m.bringToFront();}
   const v=c.lat+','+c.lon+','+st.radius;
   if(v!==lastView){lastView=v;map.fitBounds(circle.getBounds(),{padding:[8,8]})}
@@ -294,7 +295,7 @@ $('gps').addEventListener('click',()=>{
   {enableHighAccuracy:true,timeout:15000,maximumAge:60000})});
 let t;$('kw').addEventListener('input',e=>{clearTimeout(t);t=setTimeout(()=>{st.kw=e.target.value;st.shown=40;render()},120)});
 
-$('sub').textContent='카카오맵 즐겨찾기 '+P.length.toLocaleString()+'곳 · 폴더 '+FOLDERS.length+'개';
+$('sub').textContent='카카오맵 즐겨찾기 '+P.length.toLocaleString()+'곳';
 $('foot').textContent='데이터 기준: '+D.updated+' · 위치 검색은 역·동네 지명과 저장한 장소의 주소로 찾습니다.';
 initMap();
 const init=store.get('q')||'강남역';const o=resolve(init)||resolve('강남역');
