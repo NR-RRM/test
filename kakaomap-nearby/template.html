@@ -177,6 +177,7 @@ function compute(){
 }
 function scoreHtml(p){
   if(p.length<=8) return '';
+  if(p[11]) return '<div class="score">카카오맵에 정보 없음 (폐업했을 수 있음)</div>';
   if(!p[9]&&!p[10]) return '<div class="score">아직 리뷰 없음</div>';
   return '<div class="score">'+(p[9]?'<b>★ '+(+p[8]).toFixed(1)+'</b> · 리뷰 '+p[9].toLocaleString():'카카오 리뷰 없음')+(p[10]?' · 블로그 '+p[10].toLocaleString():'')+'</div>';
 }

@@ -70,7 +70,7 @@ def build(data=None):
     rev_path = ROOT / "data/reviews.json"
     if rev_path.exists():
         rev = json.loads(rev_path.read_text())
-        data = {**data, "places": [p[:8] + (rev.get(p[4]) or []) for p in data["places"]]}
+        data = {**data, "places": [p[:8] + (rev[p[4]] if rev.get(p[4]) else [0, 0, 0, 1] if p[4] in rev else []) for p in data["places"]]}
     leaflet_css = (ROOT / "vendor/leaflet.css").read_text()
     body = (ROOT / "template.html").read_text()
     body = body.replace("__PLACES__", json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/"))
