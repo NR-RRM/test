@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from . import merge as merge_mod
-from . import parakeet_engine, whisper_engine
+from . import parakeet_engine, speech_regions, whisper_engine
 from .audio import SR, extract_audio, list_audio_tracks, load_wav, pick_audio_track
 from .config import ROOT, Config
 from .model import ReviewItem, fmt_ts
@@ -22,6 +22,22 @@ ProgressFn = Callable[[Optional[float], Optional[str]], None]
 def output_paths(video: Path, out_dir: Optional[Path] = None) -> tuple[Path, Path]:
     stem = (Path(out_dir) / video.stem) if out_dir else video.with_suffix("")
     return Path(f"{stem}.en.srt"), Path(f"{stem}.review.txt")
+
+
+def speech_only_wav(audio, pk_words, cfg: Config, out_wav: Path, log) -> tuple[Path | None, object]:
+    """Parakeet 단어 위치로 대사 구간만 모은 wav를 만든다. 반환: (wav 경로, 시간 대응표).
+    줄어드는 양이 적으면(15% 미만) 그대로 두는 편이 안전하므로 (None, None)을 돌려준다."""
+    total = len(audio) / SR
+    regs = speech_regions.regions_from_words(pk_words, total, cfg.speech_pad, cfg.speech_merge_gap)
+    cond, segmap = speech_regions.condense(audio, regs)
+    kept = len(cond) / SR
+    if not regs or kept > total * 0.85:
+        log(f"[대사구간] 대사 구간 {kept:.0f}초 / 전체 {total:.0f}초 — 줄일 것이 적어 전체를 처리")
+        return None, None
+    speech_regions.write_wav(cond, out_wav)
+    log(f"[대사구간] {len(regs)}개 구간, {kept:.0f}초 / 전체 {total:.0f}초 "
+        f"({kept / total * 100:.0f}%)만 Whisper로 처리")
+    return out_wav, segmap
 
 
 def _tee_log(log: Callable[[str], None], video: Path) -> Callable[[str], None]:
@@ -58,10 +74,13 @@ def run(video: Path, cfg: Config, log: Callable[[str], None], progress: Progress
 
     # 단계별 가중치 (대략적인 소요 시간 비율)
     stages = [("extract", 0.04)]
-    if use_wh:
-        stages.append(("whisper", 0.60 if use_pk else 0.92))
-    if use_pk:
-        stages.append(("parakeet", 0.32 if use_wh else 0.92))
+    if use_wh and use_pk and cfg.whisper_speech_only:
+        stages += [("parakeet", 0.20), ("whisper", 0.72)]
+    else:
+        if use_wh:
+            stages.append(("whisper", 0.60 if use_pk else 0.92))
+        if use_pk:
+            stages.append(("parakeet", 0.32 if use_wh else 0.92))
     stages.append(("finish", 0.04))
     total = sum(w for _, w in stages)
     base = {}
@@ -99,27 +118,43 @@ def run(video: Path, cfg: Config, log: Callable[[str], None], progress: Progress
         log(f"오디오 길이: {fmt_ts(dur)}")
         p(1.0, "오디오 추출 완료")
 
-        # 2. Whisper
         t_wh = t_pk = 0.0
         backend = ""
         wh_words = pk_words = None
-        if use_wh:
-            p = stage("whisper")
-            t0 = time.time()
-            wh_words, backend = whisper_engine.transcribe(
-                Config.path(cfg.whisper_cli), Config.path(cfg.whisper_model), wav, tmp / "whisper",
-                cfg, log, cancel, p)
-            t_wh = time.time() - t0
-
-        # 3. Parakeet
         review: list[ReviewItem] = []
-        if use_pk:
+        guided = use_wh and use_pk and cfg.whisper_speech_only
+
+        def run_parakeet():
+            nonlocal pk_words, t_pk
             p = stage("parakeet")
             t0 = time.time()
             pk_words = parakeet_engine.transcribe(Config.path(cfg.parakeet_dir), audio,
                                                   cfg.parakeet_threads, log, cancel, p)
             t_pk = time.time() - t0
             cancel.check()
+
+        # 대사 구간만 처리하는 모드에서는 Parakeet을 먼저 돌린다
+        if guided:
+            run_parakeet()
+
+        # 2. Whisper
+        if use_wh:
+            p = stage("whisper")
+            t0 = time.time()
+            wh_wav, segmap = wav, None
+            if guided:
+                w2, segmap = speech_only_wav(audio, pk_words, cfg, tmp / "speech.wav", log)
+                wh_wav = w2 or wav
+            wh_words, backend = whisper_engine.transcribe(
+                Config.path(cfg.whisper_cli), Config.path(cfg.whisper_model), wh_wav, tmp / "whisper",
+                cfg, log, cancel, p)
+            if segmap is not None:
+                speech_regions.remap_words(wh_words, segmap)
+            t_wh = time.time() - t0
+
+        # 3. Parakeet
+        if use_pk and not guided:
+            run_parakeet()
         if wh_words is not None and pk_words is not None:
             words = merge_mod.merge(wh_words, pk_words, review)
         elif wh_words is not None:
@@ -142,7 +177,7 @@ def run(video: Path, cfg: Config, log: Callable[[str], None], progress: Progress
             "처리 시간": f"{elapsed / 60:.1f}분" + "".join(
                 [f", Whisper {t_wh / 60:.1f}분 ({backend})" if use_wh else "",
                  f", Parakeet {t_pk / 60:.1f}분" if use_pk else ""]),
-            "엔진": {"both": "Whisper + Parakeet 교차검증", "whisper": "Whisper 단독",
+            "엔진": {"both": "Whisper + Parakeet 교차검증" + (" (대사 구간만 Whisper)" if guided else ""), "whisper": "Whisper 단독",
                     "parakeet": "Parakeet-TDT 0.6B 단독"}[mode],
         }
         if use_wh:

@@ -29,6 +29,10 @@ class Config:
     use_parakeet: bool = True           # 교차검증
     engine_mode: str = ""               # ""(use_parakeet 따름) | both | whisper | parakeet(Parakeet 단독)
     parakeet_threads: int = 4
+    # 교차검증 모드에서 Parakeet을 먼저 돌려 대사가 있는 구간만 Whisper로 처리 (음악·무음 건너뜀)
+    whisper_speech_only: bool = False
+    speech_pad: float = 0.8             # 대사 구간 앞뒤 여유(초)
+    speech_merge_gap: float = 2.5       # 이 이하로 쉬면 같은 구간으로 묶음(초)
 
     # 자막 규칙
     max_line_chars: int = 42

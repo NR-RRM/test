@@ -23,10 +23,11 @@ from difflib import SequenceMatcher
 from pathlib import Path
 
 from . import merge as merge_mod
-from . import parakeet_engine, whisper_engine
+from . import parakeet_engine, speech_regions, whisper_engine
 from .audio import SR, extract_audio, list_audio_tracks, load_wav, pick_audio_track
 from .config import Config, load_config
 from .model import fmt_ts
+from .pipeline import speech_only_wav
 from .postprocess import build_cues
 from .util import CancelToken
 from .writers import write_review, write_srt
@@ -137,19 +138,38 @@ def main(argv: list[str]) -> int:
                                         log, cancel, stage_progress("Parakeet"))
         t_pk = time.time() - t0
 
+        # D) Parakeet이 찾은 대사 구간만 Whisper로 처리
+        print("== D) 대사 구간만 Whisper", flush=True)
+        t0 = time.time()
+        g_wav, segmap = speech_only_wav(audio, pk, cfg, tmp / "speech.wav", log)
+        wh_g, t_wh_g, kept = None, 0.0, dur
+        if g_wav is not None:
+            kept = len(load_wav(g_wav)) / SR
+            wh_g, _ = whisper_engine.transcribe(Config.path(cfg.whisper_cli), Config.path(cfg.whisper_model),
+                                                g_wav, tmp / "whisper_g", cfg, log, cancel,
+                                                stage_progress("Whisper(대사구간)"))
+            speech_regions.remap_words(wh_g, segmap)
+            t_wh_g = time.time() - t0
+
+        modes = [("A_parakeet", "Parakeet 단독"), ("B_whisper", "Whisper 단독"), ("C_both", "교차검증")]
+        if wh_g is not None:
+            modes.append(("D_guided", "교차검증(대사구간만)"))
         results = {}
-        for key, label in (("A_parakeet", "Parakeet 단독"), ("B_whisper", "Whisper 단독"), ("C_both", "교차검증")):
+        for key, label in modes:
             review = []
             t0 = time.time()
             if key == "A_parakeet":
                 words = merge_mod.parakeet_only(copy.deepcopy(pk), review)
             elif key == "B_whisper":
                 words = merge_mod.whisper_only(copy.deepcopy(wh), review)
-            else:
+            elif key == "C_both":
                 words = merge_mod.merge(copy.deepcopy(wh), copy.deepcopy(pk), review)
+            else:
+                words = merge_mod.merge(copy.deepcopy(wh_g), copy.deepcopy(pk), review)
             cues = build_cues(words, cfg, review)
             t_post = time.time() - t0
-            secs = {"A_parakeet": t_pk, "B_whisper": t_wh, "C_both": t_wh + t_pk}[key] + t_post
+            secs = {"A_parakeet": t_pk, "B_whisper": t_wh, "C_both": t_wh + t_pk,
+                    "D_guided": t_wh_g + t_pk}[key] + t_post
             srt = out / f"{video.stem}.{key}.en.srt"
             write_srt(cues, srt)
             write_review(review, out / f"{video.stem}.{key}.review.txt", video,
@@ -176,6 +196,8 @@ def main(argv: list[str]) -> int:
                        f"{r['cues']:>6}{r['review']:>6}{_agree(r['words'], base) * 100:>8.1f}%")
         rep += [
             "",
+            f"D 대사구간: 샘플 {dur:.0f}초 중 {kept:.0f}초({kept / dur * 100:.0f}%)만 Whisper로 처리"
+            if wh_g is not None else "D 대사구간: 줄일 구간이 적어 생략 (C와 같음)",
             "배속 = 샘플 길이 / 처리시간 (클수록 빠름). 40분 영상 예상은 발열로 실제보다 늘어날 수 있음.",
             "C와 일치 = 교차검증 결과와 단어가 같은 비율. 자막 파일을 열어 직접 비교해 보세요.",
             "",
@@ -184,7 +206,7 @@ def main(argv: list[str]) -> int:
         ]
         report = out / "bench-report.txt"
         report.write_text("\n".join(rep) + "\n", encoding="utf-8")
-        print("\n".join(rep[:9 + len(results)]))
+        print("\n".join(rep[:11 + len(results)]))
         print(f"\n-> 보고서: {report}")
         return 0
     finally:
