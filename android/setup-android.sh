@@ -9,7 +9,7 @@ if [ -z "${PREFIX:-}" ] || [[ "$PREFIX" != *com.termux* ]]; then
     echo "Termux 앱 안에서 실행하세요 (Ubuntu proot 안이 아니라)."; exit 1
 fi
 
-step "1/6 저장소 권한"
+step "1/7 저장소 권한"
 if [ ! -d "$SHARED/Download" ] || ! ls "$SHARED/Download" >/dev/null 2>&1; then
     echo "  '파일 및 미디어' 권한 요청 창이 뜨면 [허용]을 누르세요."
     termux-setup-storage || true
@@ -18,14 +18,14 @@ fi
 ls "$SHARED/Download" >/dev/null 2>&1 && echo "  저장소 접근 OK" \
     || echo "  ※ 저장소에 접근할 수 없습니다. 설정 → 애플리케이션 → Termux → 권한에서 '파일 및 미디어'를 허용하세요."
 
-step "2/6 Termux 패키지"
+step "2/7 Termux 패키지"
 # 설정 파일 덮어쓰기 질문(openssl.cnf 등)이 뜨지 않도록 새 버전을 자동 선택
 APT_OPTS=(-o Dpkg::Options::=--force-confnew -o Dpkg::Options::=--force-confdef)
 pkg update -y "${APT_OPTS[@]}" </dev/null || true
 pkg upgrade -y "${APT_OPTS[@]}" </dev/null || true
 pkg install -y "${APT_OPTS[@]}" proot-distro termux-api util-linux coreutils findutils procps git </dev/null
 
-step "3/6 Termux:API 앱 확인 (알림용)"
+step "3/7 Termux:API 앱 확인 (알림용)"
 if timeout 15 termux-battery-status >/dev/null 2>&1; then
     echo "  Termux:API OK"
 else
@@ -33,7 +33,7 @@ else
     echo "    (없어도 자막은 만들어지지만 진행률·완료 알림이 뜨지 않습니다)"
 fi
 
-step "4/6 Ubuntu 설치 (proot-distro, 약 500MB)"
+step "4/7 Ubuntu 설치 (proot-distro, 약 500MB)"
 # 설치 여부는 실제로 들어가 보고 판단 (proot-distro 버전마다 설치 폴더 위치가 다름)
 if proot-distro login "$DISTRO" -- true </dev/null >/dev/null 2>&1; then
     echo "  이미 설치되어 있습니다"
@@ -44,11 +44,11 @@ elif ! proot-distro install "$DISTRO"; then
 fi
 proot-distro login "$DISTRO" -- true </dev/null || { echo "!! Ubuntu 실행 실패. 이 화면을 캡처해서 보내 주세요."; exit 1; }
 
-step "5/6 Ubuntu 안에 엔진/모델 설치"
+step "5/7 Ubuntu 안에 엔진/모델 설치"
 proot-distro login "$DISTRO" --bind "$AUTOSUB_DIR:$AUTOSUB_DIR" -- \
     env AUTOSUB_VENV="$VENV" bash "$AUTOSUB_DIR/android/setup-ubuntu.sh" "$AUTOSUB_DIR"
 
-step "6/6 공유 메뉴·명령어 연결"
+step "6/7 공유 메뉴·명령어 연결"
 [ -f "$CONFIG_FILE" ] || { cp "$AUTOSUB_DIR/android/config-android.default.json" "$CONFIG_FILE"; echo "  설정 파일 생성: $CONFIG_FILE"; }
 mkdir -p "$HOME/bin"
 for h in termux-file-editor termux-url-opener; do
@@ -68,6 +68,13 @@ printf '#!/data/data/com.termux/files/usr/bin/bash\nbash "%s/android/scan.sh"\nr
     "$AUTOSUB_DIR" >"$HOME/.shortcuts/자막-폴더처리"
 chmod +x "$HOME/.shortcuts/자막-폴더처리"
 echo "  명령어: autosub 영상.mp4 / autosub-scan [폴더] / autosub-bench 영상 / autosub-cancel"
+
+step "7/7 그래픽 칩(GPU) 가속 (선택, 실패해도 CPU로 동작)"
+if [ "${AUTOSUB_SKIP_GPU:-0}" = "1" ]; then
+    echo "  건너뜀 (AUTOSUB_SKIP_GPU=1)"
+else
+    bash "$AUTOSUB_DIR/android/setup-gpu.sh" || echo "  GPU 가속 없이 CPU로 사용합니다."
+fi
 
 echo
 echo "설치 완료!"

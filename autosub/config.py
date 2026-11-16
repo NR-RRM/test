@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -14,6 +14,7 @@ class Config:
     # 경로 (ROOT 기준 상대경로 허용)
     ffmpeg: str = "tools/ffmpeg.exe" if os.name == "nt" else "ffmpeg"
     whisper_cli: str = "engines/whisper/whisper-cli.exe" if os.name == "nt" else "engines/whisper/whisper-cli"
+    whisper_cli_cpu: str = ""           # CPU 대체 실행 시 쓸 다른 whisper-cli (비우면 whisper_cli 사용)
     whisper_model: str = "models/ggml-large-v3-turbo-q8_0.bin"
     parakeet_dir: str = "models/parakeet-tdt-0.6b-v2-int8"
 
@@ -22,6 +23,7 @@ class Config:
     whisper_threads: int = 8
     whisper_beam_size: int = 5
     whisper_max_context: int = -1       # 반복 환각이 심하면 0
+    whisper_extra_args: list = field(default_factory=list)  # 예: ["-nfa"]
     language: str = "en"
     audio_track: int = -1               # -1: 영어 트랙 자동 선택, 0 이상: 해당 번호 고정
     use_parakeet: bool = True           # 교차검증

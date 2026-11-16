@@ -92,13 +92,34 @@ autosub-scan "/sdcard/Movies/드라마"                # 특정 폴더
 autosub-cancel                                       # 진행 중인 작업 취소
 ```
 
+## 그래픽 칩(GPU) 가속
+
+설치 마지막 단계에서 자동으로 시도합니다. 따로 다시 하려면:
+
+```bash
+cd ~/autosub && git pull && bash android/setup-gpu.sh
+```
+
+- Whisper를 폰의 그래픽 칩(Adreno 830)으로 돌립니다. Parakeet은 원래 빨라서 CPU 그대로입니다.
+- Ubuntu 안에서는 안드로이드 그래픽 드라이버를 쓸 수 없어서, Whisper만 Termux 쪽에서 따로 빌드합니다 (10~20분).
+- 끝에 시험 실행을 해서 성공해야만 GPU를 켭니다. GPU 실행이 도중에 실패하면 자동으로 CPU로 다시 처리합니다.
+- 실패해도 지금처럼 CPU로 정상 동작합니다. 로그: `~/.autosub/logs/setup-gpu.log`
+- 속도 비교:
+  ```bash
+  autosub-bench /sdcard/Download/test.mp4                  # GPU
+  autosub-bench /sdcard/Download/test.mp4 --backend cpu    # CPU
+  autosub-bench /sdcard/Download/test.mp4 --whisper-args "-nfa"   # GPU, flash attention 끔
+  ```
+- GPU를 끄려면 설정에서 `"whisper_backend": "cpu"`
+
 ## 설정 (`~/autosub/config-android.json`)
 
 | 항목 | 기본값 | 설명 |
 |---|---|---|
 | `engine_mode` | `both` | `both`(교차검증) / `parakeet` / `whisper`. 속도 측정 후 정합니다 |
 | `whisper_threads` / `parakeet_threads` | `8` | CPU 스레드 수 |
-| `whisper_beam_size` | `5` | `1`로 줄이면 빨라짐 |
+| `whisper_backend` | `cpu` (GPU 설정 후 `auto`) | `auto`(GPU 먼저, 실패 시 CPU) / `gpu` / `cpu` |
+| `whisper_beam_size` | `5` | 폰에서는 `1`로 줄여도 빨라지지 않고 환각만 늘었음 |
 | `max_line_chars`, `max_cps` 등 | PC와 같음 | 자막 규칙 (PC 버전 README 참고) |
 
 편집: `nano ~/autosub/config-android.json`
@@ -127,8 +148,9 @@ cd ~/autosub && git pull && bash android/setup-android.sh
 |---|---|
 | `setup-android.sh` | Termux 쪽 설치 (패키지, Ubuntu, 공유 연결, 명령어) |
 | `setup-ubuntu.sh` | Ubuntu 쪽 설치 (Python, FFmpeg, whisper.cpp 빌드, 모델) |
+| `setup-gpu.sh` | Termux 쪽 whisper.cpp OpenCL(Adreno) 빌드·시험·설정 |
 | `run.sh` | 작업 실행 + 알림 진행률 + wake lock + 대기열 |
 | `share-handler.sh` | 공유 받기 (`~/bin/termux-file-editor`, `termux-url-opener`) |
 | `scan.sh` / `bench.sh` / `cancel.sh` | 폴더 처리 / 속도 측정 / 취소 |
 
-GPU(Adreno)·NPU 가속은 아직 쓰지 않습니다. CPU만으로 속도를 먼저 확인한 뒤 결정합니다.
+NPU는 아직 쓰지 않습니다.

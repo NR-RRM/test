@@ -61,6 +61,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--config")
     ap.add_argument("--threads", type=int)
     ap.add_argument("--beam", type=int, help="Whisper beam size (1이면 greedy, 빠름)")
+    ap.add_argument("--backend", choices=["auto", "gpu", "cpu"], help="Whisper 실행 장치")
+    ap.add_argument("--whisper-model", help="Whisper 모델 파일 (models/ 아래 이름 또는 경로)")
+    ap.add_argument("--whisper-args", default="", help='whisper-cli 추가 옵션, 예: "-nfa"')
     args = ap.parse_args(argv)
 
     cfg = load_config(Path(args.config) if args.config else None)
@@ -68,6 +71,13 @@ def main(argv: list[str]) -> int:
         cfg.whisper_threads = cfg.parakeet_threads = args.threads
     if args.beam:
         cfg.whisper_beam_size = args.beam
+    if args.backend:
+        cfg.whisper_backend = args.backend
+    if args.whisper_model:
+        m = args.whisper_model
+        cfg.whisper_model = m if ("/" in m or "\\" in m) else f"models/{m}"
+    if args.whisper_args:
+        cfg.whisper_extra_args = args.whisper_args.split()
     video = Path(args.video).resolve()
     out = Path(args.out_dir) if args.out_dir else video.with_name(video.stem + ".bench")
     out.mkdir(parents=True, exist_ok=True)
@@ -148,7 +158,8 @@ def main(argv: list[str]) -> int:
             f"샘플: {fmt_ts(start)} 부터 {dur:.0f}초",
             f"CPU: {_cpu_info()}",
             f"스레드: Whisper {cfg.whisper_threads}, Parakeet {cfg.parakeet_threads}",
-            f"Whisper: {Path(cfg.whisper_model).name}, beam {cfg.whisper_beam_size}, {backend}",
+            f"Whisper: {Path(cfg.whisper_model).name}, beam {cfg.whisper_beam_size}, {backend}"
+            + (f", 옵션 {' '.join(cfg.whisper_extra_args)}" if cfg.whisper_extra_args else ""),
             "",
             f"{'모드':<16}{'처리시간':>9}{'배속':>8}{'40분 영상 예상':>14}{'자막':>6}{'검수':>6}{'C와 일치':>9}",
         ]
@@ -174,5 +185,13 @@ def main(argv: list[str]) -> int:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def _main() -> int:
+    try:
+        return main(sys.argv[1:])
+    except RuntimeError as e:
+        print(f"!! 실패: {e}", flush=True)
+        return 1
+
+
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    sys.exit(_main())

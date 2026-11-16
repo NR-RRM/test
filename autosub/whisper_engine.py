@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -30,7 +31,7 @@ _PROGRESS = re.compile(r"progress\s*=\s*(\d+)%")
 _SPECIAL = re.compile(r"^\[_.*\]$")
 # [BLANK_AUDIO], (music), ♪ ... 같은 비대사 세그먼트
 _NONSPEECH = re.compile(r"^[\s\[\(\*♪♫].*[\]\)\*♪♫]\s*$|^[\s♪♫.]*$")
-_INTERESTING = ("vulkan", "error", "fail", "gpu", "device", "system_info", "backend", "warn")
+_INTERESTING = ("vulkan", "opencl", "adreno", "error", "fail", "gpu", "device", "system_info", "backend", "warn")
 
 
 def _words_from_json(data: dict) -> list[Word]:
@@ -63,12 +64,18 @@ def transcribe(cli: Path, model: Path, wav: Path, out_base: Path, cfg, log, canc
                progress) -> tuple[list[Word], str]:
     if not cli.exists():
         raise RuntimeError(f"whisper-cli를 찾을 수 없습니다: {cli}\nsetup.bat을 먼저 실행하세요.")
+    cpu_cli = cli
+    if getattr(cfg, "whisper_cli_cpu", ""):
+        from .config import Config
+        c = Config.path(cfg.whisper_cli_cpu)
+        if c.exists():
+            cpu_cli = c
     if not model.exists():
         raise RuntimeError(f"Whisper 모델이 없습니다: {model}\nsetup.bat을 먼저 실행하세요.")
 
     if not supports(cli, "-ojf"):
         raise RuntimeError(f"이 whisper-cli는 너무 오래된 버전입니다 (-ojf 미지원): {cli}")
-    base = [str(cli), "-m", str(model), "-f", str(wav), "-l", cfg.language,
+    base = ["-m", str(model), "-f", str(wav), "-l", cfg.language,
             "-t", str(cfg.whisper_threads), "-bs", str(cfg.whisper_beam_size),
             "-ojf", "-of", str(out_base)]
     for flag in ("-pp", "-sns"):
@@ -78,13 +85,15 @@ def transcribe(cli: Path, model: Path, wav: Path, out_base: Path, cfg, log, canc
             log(f"[Whisper] 이 빌드는 {flag} 옵션을 지원하지 않아 생략합니다")
     if cfg.whisper_max_context >= 0:
         base += ["-mc", str(cfg.whisper_max_context)]
+    base += [str(a) for a in (getattr(cfg, "whisper_extra_args", None) or [])]
 
-    attempts = {"gpu": [("GPU(Vulkan)", [])], "cpu": [("CPU", ["-ng"])]}.get(
-        cfg.whisper_backend, [("GPU(Vulkan)", []), ("CPU", ["-ng"])])
+    gpu_label = "GPU(Vulkan)" if os.name == "nt" else "GPU"
+    gpu, cpu = (gpu_label, cli, []), ("CPU", cpu_cli, ["-ng"])
+    attempts = {"gpu": [gpu], "cpu": [cpu]}.get(cfg.whisper_backend, [gpu, cpu])
 
     out_json = Path(str(out_base) + ".json")
     last_err = ""
-    for label, extra in attempts:
+    for label, exe, extra in attempts:
         cancel.check()
         if out_json.exists():
             out_json.unlink()
@@ -105,7 +114,7 @@ def transcribe(cli: Path, model: Path, wav: Path, out_base: Path, cfg, log, canc
             else:
                 progress(None, None)  # 하트비트
 
-        rc = run_logged(base + extra, log, cancel, on_line=on_line)
+        rc = run_logged([str(exe)] + base + extra, log, cancel, on_line=on_line)
         if rc == 0 and out_json.exists():
             data = json.loads(out_json.read_text(encoding="utf-8", errors="replace"))
             words = _words_from_json(data)
