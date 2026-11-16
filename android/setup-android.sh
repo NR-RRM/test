@@ -19,8 +19,11 @@ ls "$SHARED/Download" >/dev/null 2>&1 && echo "  저장소 접근 OK" \
     || echo "  ※ 저장소에 접근할 수 없습니다. 설정 → 애플리케이션 → Termux → 권한에서 '파일 및 미디어'를 허용하세요."
 
 step "2/6 Termux 패키지"
-yes | pkg update -y || true
-pkg install -y proot-distro termux-api util-linux coreutils findutils procps git
+# 설정 파일 덮어쓰기 질문(openssl.cnf 등)이 뜨지 않도록 새 버전을 자동 선택
+APT_OPTS=(-o Dpkg::Options::=--force-confnew -o Dpkg::Options::=--force-confdef)
+pkg update -y "${APT_OPTS[@]}" </dev/null || true
+pkg upgrade -y "${APT_OPTS[@]}" </dev/null || true
+pkg install -y "${APT_OPTS[@]}" proot-distro termux-api util-linux coreutils findutils procps git </dev/null
 
 step "3/6 Termux:API 앱 확인 (알림용)"
 if timeout 15 termux-battery-status >/dev/null 2>&1; then

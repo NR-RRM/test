@@ -25,7 +25,14 @@ Play 스토어의 Termux는 오래된 버전이라 동작하지 않습니다. **
 
 ## 2. 프로그램 설치
 
-Termux를 열고 아래를 한 줄씩 입력합니다.
+Termux를 열고 먼저 **다운로드 서버를 가까운 곳으로 바꿉니다** (기본 서버가 해외라 매우 느릴 수 있음).
+
+```bash
+termux-change-repo
+```
+- 첫 화면에서 **Mirror group** 선택 → 다음 화면에서 **Asia**(또는 Korea가 있으면 그것) 선택 → OK
+
+그다음 아래를 한 줄씩 입력합니다.
 
 ```bash
 pkg install -y git
@@ -34,6 +41,7 @@ bash ~/autosub/android/setup-android.sh
 ```
 
 - 중간에 '파일 및 미디어 접근' 권한 창이 뜨면 **허용**을 누르세요.
+- 설치 중 `openssl.cnf (Y/I/N/O/D/Z)` 처럼 설정 파일을 물으면 **Y** 입력 후 엔터.
 - 저장소가 비공개라서 `git clone`이 아이디/비밀번호를 물으면: 아이디는 GitHub 아이디,
   비밀번호 자리에 GitHub **Personal access token**을 넣으세요.
 - 설치는 여러 번 실행해도 안전합니다. 중간에 끊기면 마지막 줄만 다시 실행하세요 (받은 파일은 이어받습니다).
