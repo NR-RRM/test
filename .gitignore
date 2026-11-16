@@ -1,0 +1,9 @@
+.venv/
+engines/
+models/
+tools/
+config.json
+*.zip
+__pycache__/
+*.pyc
+.pytest_cache/

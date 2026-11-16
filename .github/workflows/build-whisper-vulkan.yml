@@ -1,0 +1,63 @@
+# Intel Arc 등 GPU 가속용 whisper.cpp (Vulkan) Windows 빌드.
+# whisper.cpp 공식 릴리스에는 Windows Vulkan 빌드가 없어서 직접 빌드한다.
+# 결과물: Actions 실행 페이지 하단 Artifacts의 "whisper-vulkan-x64" → 받은 zip을 프로그램 폴더에 두고 setup.bat 실행
+name: Build whisper.cpp (Vulkan, Windows)
+
+on:
+  workflow_dispatch:
+    inputs:
+      whisper_ref:
+        description: "whisper.cpp 태그/브랜치"
+        default: "v1.9.5"
+  push:
+    paths: [".github/workflows/build-whisper-vulkan.yml"]
+
+env:
+  WHISPER_REF: ${{ github.event.inputs.whisper_ref || 'v1.9.5' }}
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Install Vulkan SDK
+        shell: pwsh
+        run: |
+          curl.exe -L --fail --retry 3 -o "$env:RUNNER_TEMP\vulkan-sdk.exe" "https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-sdk.exe"
+          & "$env:RUNNER_TEMP\vulkan-sdk.exe" --root C:\VulkanSDK --accept-licenses --default-answer --confirm-command install
+          if (-not (Test-Path C:\VulkanSDK\Bin\glslc.exe)) { Get-ChildItem C:\VulkanSDK -Recurse -Depth 2 | Select-Object -First 30; throw "Vulkan SDK 설치 실패" }
+          Add-Content $env:GITHUB_ENV "VULKAN_SDK=C:\VulkanSDK"
+          Add-Content $env:GITHUB_PATH "C:\VulkanSDK\Bin"
+
+      - name: Clone whisper.cpp
+        shell: pwsh
+        run: git clone --depth 1 --branch $env:WHISPER_REF https://github.com/ggml-org/whisper.cpp src
+
+      - name: Build
+        shell: pwsh
+        working-directory: src
+        run: |
+          cmake -B build -DGGML_VULKAN=ON -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release -j 4 --target whisper-cli
+          Get-ChildItem build\bin\Release
+
+      - name: Smoke test (CPU only on runner)
+        shell: pwsh
+        working-directory: src
+        run: |
+          .\build\bin\Release\whisper-cli.exe --help 2>&1 | Select-Object -First 5
+          if ($LASTEXITCODE -ne 0) { throw "whisper-cli 실행 실패" }
+
+      - name: Collect
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory out | Out-Null
+          Copy-Item src\build\bin\Release\*.exe, src\build\bin\Release\*.dll out\ -ErrorAction SilentlyContinue
+          Copy-Item src\LICENSE out\whisper.cpp-LICENSE.txt
+          "whisper.cpp $env:WHISPER_REF (GGML_VULKAN=ON)" | Out-File out\BUILD_INFO.txt
+          Get-ChildItem out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: whisper-vulkan-x64
+          path: out/
+          retention-days: 90
