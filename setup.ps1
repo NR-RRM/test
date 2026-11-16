@@ -4,6 +4,8 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 $Root = $PSScriptRoot
 Set-Location $Root
+# 기존 '자막생성툴'이 쓰는 공용 폴더. 읽기(복사)만 하고 절대 수정하지 않는다.
+$OldRuntime = Join-Path $(if ($env:PUBLIC) { $env:PUBLIC } else { "C:\Users\Public" }) "Documents\SubtitleToolRuntime"
 
 function Step($msg) { Write-Host ""; Write-Host "== $msg" -ForegroundColor Cyan }
 function Download($url, $dest) {
@@ -40,6 +42,15 @@ if ($LASTEXITCODE -ne 0) { throw "pip 설치 실패" }
 
 # 2. FFmpeg ------------------------------------------------------------
 Step "2/5 FFmpeg"
+$existingFF = @(
+    (Get-ChildItem "$OldRuntime\FFmpeg" -Recurse -Filter ffmpeg.exe -Depth 4 -ErrorAction SilentlyContinue | Select-Object -First 1).FullName,
+    (Get-Command ffmpeg.exe -ErrorAction SilentlyContinue).Source
+) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+if (-not (Test-Path "tools\ffmpeg.exe") -and $existingFF) {
+    Write-Host "  이미 설치된 FFmpeg를 복사해서 사용: $existingFF" -ForegroundColor Green
+    New-Item -ItemType Directory -Force tools | Out-Null
+    Copy-Item "$(Split-Path $existingFF)\*" tools\ -Include *.exe,*.dll
+}
 if (-not (Test-Path "tools\ffmpeg.exe")) {
     $zip = "$env:TEMP\ffmpeg-essentials.zip"
     Download "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" $zip
@@ -57,6 +68,16 @@ $dst = "engines\whisper"
 if ($vk) {
     Write-Host "  Vulkan(GPU) 빌드 사용: $($vk.Name)" -ForegroundColor Green
     $src = $vk.FullName
+} elseif (-not (Test-Path "$dst\whisper-cli.exe") -and ($oldVk = @(
+        "$OldRuntime\WhisperCppSource\build-vulkan\bin\Release\whisper-cli.exe",
+        "$OldRuntime\WhisperCppSource\build-vulkan\bin\whisper-cli.exe",
+        "C:\whisper.cpp\build-vulkan\bin\Release\whisper-cli.exe",
+        "C:\whisper.cpp\build-vulkan\bin\whisper-cli.exe"
+    ) | Where-Object { Test-Path $_ } | Select-Object -First 1)) {
+    Write-Host "  이미 PC에 빌드된 Vulkan whisper-cli를 복사해서 사용: $oldVk" -ForegroundColor Green
+    New-Item -ItemType Directory -Force $dst | Out-Null
+    Copy-Item "$(Split-Path $oldVk)\*" $dst -Include *.exe,*.dll
+    $src = $null
 } elseif (-not (Test-Path "$dst\whisper-cli.exe")) {
     Write-Host "  whisper-vulkan-x64.zip 이 없어 공식 CPU 빌드를 받습니다." -ForegroundColor Yellow
     Write-Host "  (GPU 가속을 쓰려면 README의 'Vulkan 빌드 받기'를 참고하세요)"

@@ -23,6 +23,7 @@ class Config:
     whisper_beam_size: int = 5
     whisper_max_context: int = -1       # 반복 환각이 심하면 0
     language: str = "en"
+    audio_track: int = -1               # -1: 영어 트랙 자동 선택, 0 이상: 해당 번호 고정
     use_parakeet: bool = True           # 교차검증
     parakeet_threads: int = 4
 

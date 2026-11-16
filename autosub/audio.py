@@ -1,19 +1,43 @@
 from __future__ import annotations
 
+import re
+import subprocess
 import wave
 from pathlib import Path
 
 import numpy as np
 
-from .util import run_logged
+from .util import CREATE_NO_WINDOW, run_logged
+
+_AUDIO_STREAM = re.compile(r"Stream #\d+:\d+(?:\[[^\]]*\])?(?:\((?P<lang>[^)]*)\))?: Audio: (?P<desc>.*)")
+
+
+def list_audio_tracks(ffmpeg: Path, video: Path) -> list[tuple[str, str]]:
+    """[(언어, 설명), ...] — ffmpeg -i 출력 파싱 (ffprobe 없이)."""
+    try:
+        r = subprocess.run([str(ffmpeg), "-hide_banner", "-nostdin", "-i", str(video)],
+                           capture_output=True, timeout=60, creationflags=CREATE_NO_WINDOW)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    text = r.stderr.decode("utf-8", "replace")
+    return [(m.group("lang") or "", m.group("desc").strip()) for m in _AUDIO_STREAM.finditer(text)]
+
+
+def pick_audio_track(tracks: list[tuple[str, str]], wanted: str = "en") -> int:
+    """영어 트랙(eng/en)이 있으면 그 번호, 없으면 0. 해설(commentary) 트랙은 피한다."""
+    codes = {"en": ("eng", "en"), "ja": ("jpn", "ja"), "ko": ("kor", "ko")}.get(wanted, (wanted,))
+    for i, (lang, desc) in enumerate(tracks):
+        if lang.lower() in codes and "comment" not in desc.lower():
+            return i
+    return 0
 
 SR = 16000
 
 
-def extract_audio(ffmpeg: Path, video: Path, out_wav: Path, log, cancel, progress) -> None:
-    """영상 첫 번째 오디오 트랙 → 16kHz mono PCM wav."""
+def extract_audio(ffmpeg: Path, video: Path, out_wav: Path, log, cancel, progress, track: int = 0) -> None:
+    """영상의 오디오 트랙(track번째) → 16kHz mono PCM wav."""
     cmd = [str(ffmpeg), "-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-stats", "-i", str(video),
-           "-map", "0:a:0", "-vn", "-ac", "1", "-ar", str(SR), "-c:a", "pcm_s16le", str(out_wav)]
+           "-map", f"0:a:{track}", "-vn", "-ac", "1", "-ar", str(SR), "-c:a", "pcm_s16le", str(out_wav)]
     def on_line(line: str):
         if line.startswith("size=") or " time=" in line:
             progress(None, None)  # 하트비트

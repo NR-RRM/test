@@ -21,6 +21,27 @@ BACKENDS = {"자동 (GPU 시도 → 실패 시 CPU)": "auto", "GPU (Vulkan)": "g
 STALL_WARN = 180  # 초: 이 시간 동안 아무 출력이 없으면 경고
 
 
+def external_model_dirs() -> list[Path]:
+    """기존에 설치된 다른 자막 도구/팟플레이어의 Whisper 모델도 재사용 (중복 다운로드 방지)."""
+    env = os.environ.get
+    cands = [
+        Path(env("PUBLIC", r"C:\Users\Public")) / "Documents" / "SubtitleToolRuntime" / "WhisperCpp" / "Models",
+        Path(env("LOCALAPPDATA", "")) / "WhisperCppModels" if env("LOCALAPPDATA") else None,
+        Path(env("APPDATA", "")) / "PotPlayer64" / "Model" if env("APPDATA") else None,
+        Path(env("APPDATA", "")) / "PotPlayerMini64" / "Model" if env("APPDATA") else None,
+        Path(r"C:\WhisperCpp\models"),
+    ]
+    return [p for p in cands if p and p.is_dir()]
+
+
+def find_models() -> list[str]:
+    out = sorted(str(p.relative_to(ROOT)).replace("\\", "/") for p in (ROOT / "models").glob("ggml-*.bin"))
+    for d in external_model_dirs():
+        out += sorted(str(p) for p in d.glob("ggml-*.bin")
+                      if "silero" not in p.name and p.stat().st_size > 50_000_000)
+    return out
+
+
 def _fmt(sec: float) -> str:
     sec = int(max(0, sec))
     h, r = divmod(sec, 3600)
@@ -77,7 +98,7 @@ class App:
         f2.pack(fill="x", **pad)
         ttk.Label(f2, text="Whisper 모델").grid(row=0, column=0, sticky="w", padx=6, pady=3)
         self.model_var = StringVar(value=self.cfg.whisper_model)
-        models = sorted(str(p.relative_to(ROOT)).replace("\\", "/") for p in (ROOT / "models").glob("ggml-*.bin"))
+        models = find_models()
         if self.cfg.whisper_model not in models:
             models.insert(0, self.cfg.whisper_model)
         ttk.Combobox(f2, textvariable=self.model_var, values=models, width=48).grid(row=0, column=1, sticky="w")
@@ -293,8 +314,34 @@ class App:
         self.root.destroy()
 
 
+def _fatal(exc_text: str):
+    """pythonw로 실행하면 오류가 화면에 안 보이므로 파일로 남기고 알림창을 띄운다."""
+    path = ROOT / "logs" / "crash.log"
+    try:
+        path.parent.mkdir(exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(time.strftime("[%Y-%m-%d %H:%M:%S]\n") + exc_text + "\n")
+    except OSError:
+        pass
+    msg = f"프로그램 오류가 발생했습니다.\n\n{exc_text[-800:]}\n\n기록: {path}"
+    try:
+        messagebox.showerror("자막 자동 생성 — 오류", msg)
+    except Exception:  # noqa: BLE001
+        if os.name == "nt":
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(0, msg, "자막 자동 생성 — 오류", 0x10)
+
+
 def main():
+    try:
+        _main()
+    except Exception:  # noqa: BLE001
+        _fatal(traceback.format_exc())
+
+
+def _main():
     root = Tk()
+    root.report_callback_exception = lambda *a: _fatal("".join(traceback.format_exception(*a)))
     try:
         ttk.Style().theme_use("vista" if os.name == "nt" else "clam")
     except Exception:  # noqa: BLE001

@@ -8,8 +8,8 @@ from typing import Callable, Optional
 
 from . import merge as merge_mod
 from . import parakeet_engine, whisper_engine
-from .audio import SR, extract_audio, load_wav
-from .config import Config
+from .audio import SR, extract_audio, list_audio_tracks, load_wav, pick_audio_track
+from .config import ROOT, Config
 from .model import ReviewItem, fmt_ts
 from .postprocess import build_cues
 from .util import CancelToken
@@ -24,10 +24,30 @@ def output_paths(video: Path) -> tuple[Path, Path]:
     return Path(f"{stem}.en.srt"), Path(f"{stem}.review.txt")
 
 
+def _tee_log(log: Callable[[str], None], video: Path) -> Callable[[str], None]:
+    """화면 로그를 logs/ 폴더 파일에도 남긴다 (프로그램이 죽어도 원인 확인 가능)."""
+    try:
+        d = ROOT / "logs"
+        d.mkdir(exist_ok=True)
+        f = open(d / f"{time.strftime('%Y%m%d_%H%M%S')}_{video.stem[:60]}.log", "a", encoding="utf-8")
+    except OSError:
+        return log
+
+    def tee(msg: str):
+        log(msg)
+        try:
+            f.write(msg + "\n")
+            f.flush()
+        except (OSError, ValueError):
+            pass
+    return tee
+
+
 def run(video: Path, cfg: Config, log: Callable[[str], None], progress: ProgressFn,
         cancel: CancelToken) -> tuple[Path, Path]:
     t_start = time.time()
     video = video.resolve()
+    log = _tee_log(log, video)
     if not video.exists():
         raise RuntimeError(f"파일이 없습니다: {video}")
     srt_path, review_path = output_paths(video)
@@ -58,7 +78,16 @@ def run(video: Path, cfg: Config, log: Callable[[str], None], progress: Progress
         p = stage("extract")
         p(0.0, "오디오 추출 중")
         wav = tmp / "audio.wav"
-        extract_audio(Config.path(cfg.ffmpeg), video, wav, log, cancel, p)
+        ffmpeg = Config.path(cfg.ffmpeg)
+        if not ffmpeg.exists():
+            raise RuntimeError(f"FFmpeg를 찾을 수 없습니다: {ffmpeg}\nsetup.bat을 먼저 실행하세요.")
+        tracks = list_audio_tracks(ffmpeg, video)
+        if not tracks:
+            raise RuntimeError("영상에서 오디오 트랙을 찾지 못했습니다.")
+        track = cfg.audio_track if 0 <= cfg.audio_track < len(tracks) else pick_audio_track(tracks, cfg.language)
+        for i, (lang, desc) in enumerate(tracks):
+            log(f"  오디오 트랙 {i}: [{lang or '언어정보 없음'}] {desc[:70]}" + ("   ← 사용" if i == track else ""))
+        extract_audio(ffmpeg, video, wav, log, cancel, p, track)
         audio = load_wav(wav)
         dur = len(audio) / SR
         log(f"오디오 길이: {fmt_ts(dur)}")

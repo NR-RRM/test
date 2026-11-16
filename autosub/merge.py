@@ -39,6 +39,36 @@ def _clean(words: list[Word]) -> list[Word]:
     return out
 
 
+def trim_runaway(words: list[Word], review: list[ReviewItem], keep: int = 3, min_run: int = 5) -> list[Word]:
+    """한 문장 안에서 같은 단어/짧은 구(1~4단어)가 min_run회 이상 연달아 반복되면 keep회만 남긴다.
+    ("no no no no no no no ..." 같은 Whisper 폭주 환각). 4회 이하는 실제 대사일 수 있어 유지."""
+    out: list[Word] = []
+    i, n = 0, len(words)
+    keys = [norm(w.text) for w in words]
+    while i < n:
+        best = None
+        for unit in range(1, 5):
+            if i + unit * min_run > n:
+                break
+            pat = keys[i:i + unit]
+            reps = 1
+            while keys[i + reps * unit:i + (reps + 1) * unit] == pat:
+                reps += 1
+            if reps >= min_run and (best is None or reps * unit > best[0] * best[1]):
+                best = (reps, unit)
+        if best:
+            reps, unit = best
+            span = words[i:i + reps * unit]
+            out.extend(span[:keep * unit])
+            review.append(ReviewItem(span[0].start, "환각제거",
+                                     f"\"{_text(span[:unit])}\" {reps}회 반복 → {keep}회로 줄임"))
+            i += reps * unit
+        else:
+            out.append(words[i])
+            i += 1
+    return out
+
+
 def collapse_repeats(words: list[Word], review: list[ReviewItem]) -> list[Word]:
     """같은 문장이 3번 이상 연달아 반복되는 Whisper 반복 환각 제거."""
     segs: dict[int, list[Word]] = {}
@@ -75,7 +105,7 @@ def _has_words_between(ws: list[Word], t0: float, t1: float) -> bool:
 
 def whisper_only(words: list[Word], review: list[ReviewItem]) -> list[Word]:
     """교차검증 없이 Whisper만 쓸 때: 반복 제거 + 의심 문구 표시만."""
-    words = collapse_repeats(_clean(words), review)
+    words = collapse_repeats(trim_runaway(_clean(words), review), review)
     full = norm(_text(words))
     for ph in HALLUCINATION_PHRASES:
         if norm(ph) in full:
@@ -87,7 +117,7 @@ def whisper_only(words: list[Word], review: list[ReviewItem]) -> list[Word]:
 
 
 def merge(wh: list[Word], pk: list[Word], review: list[ReviewItem]) -> list[Word]:
-    wh = collapse_repeats(_clean(wh), review)
+    wh = collapse_repeats(trim_runaway(_clean(wh), review), review)
     pk = _clean(pk)
     a, b = [norm(w.text) for w in wh], [norm(w.text) for w in pk]
     sm = SequenceMatcher(None, a, b, autojunk=False)

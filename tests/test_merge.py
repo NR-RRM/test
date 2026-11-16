@@ -64,3 +64,21 @@ def test_wrap_balanced():
     assert wrap("short", 42) == "short"
     l1, l2 = wrap("what your country can do for you, ask what you can do for your country.", 42).split("\n")
     assert l1.endswith(",")
+
+
+def test_runaway_repetition_trimmed_but_short_repeats_kept():
+    from autosub.merge import trim_runaway
+    review = []
+    ws = seq("I said " + "no, " * 12 + "okay.", 0, "whisper")
+    out = trim_runaway(ws, review)
+    assert " ".join(w.text for w in out) == "I said no, no, no, okay."
+    assert review and review[0].kind == "환각제거"
+    real = seq("No, no, no, no. Stop.", 0, "whisper")
+    assert len(trim_runaway(real, [])) == len(real)   # 4회는 실제 대사로 보고 유지
+
+
+def test_pick_english_audio_track():
+    from autosub.audio import pick_audio_track
+    tracks = [("kor", "aac, 48000 Hz, stereo"), ("eng", "aac (commentary)"), ("eng", "ac3, 48000 Hz, 5.1")]
+    assert pick_audio_track(tracks, "en") == 2
+    assert pick_audio_track([("", "aac")], "en") == 0

@@ -2,10 +2,29 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from pathlib import Path
 
 from .model import Word
-from .util import CancelToken, run_logged
+from .util import CREATE_NO_WINDOW, CancelToken, run_logged
+
+_caps_cache: dict[str, str] = {}
+
+
+def help_text(cli: Path) -> str:
+    """whisper-cli -h 출력. 버전마다 지원 옵션이 달라서(기존에 설치된 빌드 재사용 시) 확인 후 사용한다."""
+    key = str(cli)
+    if key not in _caps_cache:
+        try:
+            r = subprocess.run([key, "-h"], capture_output=True, timeout=20, creationflags=CREATE_NO_WINDOW)
+            _caps_cache[key] = (r.stdout + r.stderr).decode("utf-8", "replace")
+        except (OSError, subprocess.TimeoutExpired):
+            _caps_cache[key] = ""
+    return _caps_cache[key]
+
+
+def supports(cli: Path, flag: str) -> bool:
+    return re.search(rf"(?<![\w-]){re.escape(flag)}\b", help_text(cli)) is not None
 
 _PROGRESS = re.compile(r"progress\s*=\s*(\d+)%")
 _SPECIAL = re.compile(r"^\[_.*\]$")
@@ -47,9 +66,16 @@ def transcribe(cli: Path, model: Path, wav: Path, out_base: Path, cfg, log, canc
     if not model.exists():
         raise RuntimeError(f"Whisper 모델이 없습니다: {model}\nsetup.bat을 먼저 실행하세요.")
 
+    if not supports(cli, "-ojf"):
+        raise RuntimeError(f"이 whisper-cli는 너무 오래된 버전입니다 (-ojf 미지원): {cli}")
     base = [str(cli), "-m", str(model), "-f", str(wav), "-l", cfg.language,
             "-t", str(cfg.whisper_threads), "-bs", str(cfg.whisper_beam_size),
-            "-ojf", "-of", str(out_base), "-pp", "-sns"]
+            "-ojf", "-of", str(out_base)]
+    for flag in ("-pp", "-sns"):
+        if supports(cli, flag):
+            base.append(flag)
+        else:
+            log(f"[Whisper] 이 빌드는 {flag} 옵션을 지원하지 않아 생략합니다")
     if cfg.whisper_max_context >= 0:
         base += ["-mc", str(cfg.whisper_max_context)]
 

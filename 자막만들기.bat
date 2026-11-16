@@ -6,4 +6,4 @@ if not exist ".venv\Scripts\pythonw.exe" (
   pause
   exit /b 1
 )
-start "" ".venv\Scripts\pythonw.exe" -m autosub.gui %*
+start "" ".venv\Scripts\pythonw.exe" run_gui.pyw %*
