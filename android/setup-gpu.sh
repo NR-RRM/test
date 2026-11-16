@@ -63,36 +63,66 @@ else
     cp "$SRC/build/bin/whisper-cli" "$DST/whisper-cli.bin"
     echo "$WANT" >"$DST/BUILD_INFO"
 fi
-# Ubuntu 안에서도 같은 드라이버 경로로 실행되도록 감싸는 스크립트
-cat >"$DST/whisper-cli" <<EOF
-#!$PREFIX/bin/bash
-# autosub: Adreno GPU용 whisper-cli (setup-gpu.sh가 생성)
-export LD_LIBRARY_PATH="${OCL_LD:-$PREFIX/lib}"
-export GGML_OPENCL_KERNEL_CACHE_DIR="$DST/kernel-cache"
-exec "$DST/whisper-cli.bin" "\$@"
-EOF
-chmod +x "$DST/whisper-cli"
+# Ubuntu 안에서도 같은 드라이버 경로로 실행되도록 감싸는 스크립트.
+# write_wrapper "<환경변수들>" "<추가 옵션>"
+write_wrapper() {
+    {
+        echo "#!$PREFIX/bin/bash"
+        echo "# autosub: Adreno GPU용 whisper-cli (setup-gpu.sh가 생성). 시험 통과 설정: ${1:-기본} ${2:-}"
+        echo "export LD_LIBRARY_PATH=\"${OCL_LD:-$PREFIX/lib}\""
+        echo "export GGML_OPENCL_KERNEL_CACHE_DIR=\"$DST/kernel-cache\""
+        for kv in $1; do echo "export $kv"; done
+        # -h(옵션 확인)에는 추가 옵션을 붙이지 않는다
+        echo "[ \"\$1\" = \"-h\" ] && exec \"$DST/whisper-cli.bin\" -h"
+        echo "exec \"$DST/whisper-cli.bin\" \"\$@\" $2"
+    } >"$DST/whisper-cli"
+    chmod +x "$DST/whisper-cli"
+}
 mkdir -p "$DST/kernel-cache"
 
 step "4/5 GPU 시험 (첫 실행은 그래픽 칩용 코드를 만드느라 몇 분 걸릴 수 있음)"
 [ -f "$MODEL" ] || fail "Whisper 모델이 없습니다. setup-android.sh를 먼저 실행하세요"
 SAMPLE="$SRC/samples/jfk.wav"
 [ -f "$SAMPLE" ] || fail "시험용 음성 파일이 없습니다: $SAMPLE"
+timeout 30 env ${OCL_LD:+LD_LIBRARY_PATH="$OCL_LD"} clinfo 2>/dev/null \
+    | grep -iE "^ *(Platform Version|Driver Version|Device Version|Max memory allocation|Global memory size)" \
+    | head -6 | sed 's/^ */  /'
+N=0
 run_test() {   # run_test <이름> <명령...>
     local name="$1"; shift
-    local t0 out
+    local t0 out rc
+    N=$((N + 1))
     t0=$(date +%s)
-    out=$("$@" -m "$MODEL" -f "$SAMPLE" -l en -t 8 -nt 2>&1)
-    echo "$out" | grep -iE "opencl|adreno|gpu|device|error|fail" | head -15 | sed 's/^/    /'
-    if echo "$out" | grep -qi "ask not what your country" && echo "$out" | grep -qi "adreno"; then
+    out=$("$@" -m "$MODEL" -f "$SAMPLE" -l en -t 8 -nt 2>&1); rc=$?
+    printf '%s\n' "$out" >"$STATE/logs/gpu-test-$N.txt"
+    if [ "$rc" -eq 0 ] && echo "$out" | grep -qi "ask not what your country" && echo "$out" | grep -qi "adreno"; then
+        if echo "$out" | grep -qi "no GPU found"; then
+            echo "  [$name] GPU를 쓰지 않고 CPU로 처리됨"; return 1
+        fi
         echo "  [$name] 성공 ($(( $(date +%s) - t0 ))초)"
         return 0
     fi
-    echo "$out" | tail -5 | sed 's/^/    /'
-    echo "  [$name] 실패"
+    local why="종료코드 $rc"
+    case $rc in 139) why="$why (프로그램 충돌 SIGSEGV)" ;; 134) why="$why (중단 SIGABRT)" ;;
+                137) why="$why (강제 종료됨, 메모리 부족 가능)" ;; 135) why="$why (SIGBUS)" ;; esac
+    echo "  [$name] 실패: $why, $(( $(date +%s) - t0 ))초 — 마지막 출력:"
+    echo "$out" | grep -v "^\s*$" | tail -8 | cut -c1-150 | sed 's/^/      /'
     return 1
 }
-run_test "Termux" "$DST/whisper-cli" || fail "GPU로 Whisper 실행 실패"
+# 드라이버·버전마다 문제가 되는 기능이 달라서, 기본 설정이 실패하면 하나씩 끄면서 다시 시험한다
+VARIANTS=(
+    "|"
+    "GGML_OPENCL_ADRENO_XMEM_GEMM=0|"
+    "GGML_OPENCL_ADRENO_XMEM_GEMM=0|-nfa"
+    "GGML_OPENCL_ADRENO_XMEM_GEMM=0 GGML_OPENCL_DISABLE_FUSION=1 GGML_OPENCL_KERNEL_CACHE_DIR=off|-nfa"
+)
+OK_VARIANT=""
+for v in "${VARIANTS[@]}"; do
+    envs=${v%%|*}; args=${v#*|}
+    write_wrapper "$envs" "$args"
+    if run_test "Termux, 설정: ${envs:-기본} ${args}" "$DST/whisper-cli"; then OK_VARIANT="$v"; break; fi
+done
+[ -n "$OK_VARIANT" ] || fail "모든 설정에서 GPU 실행 실패 (각 시험의 전체 출력: $STATE/logs/gpu-test-*.txt)"
 run_test "Termux 2회차(캐시)" "$DST/whisper-cli" || true
 # 실제 파이프라인처럼 Ubuntu 안에서 호출
 run_test "Ubuntu 안에서" proot-distro login "$DISTRO" --bind "$AUTOSUB_DIR:$AUTOSUB_DIR" -- "$DST/whisper-cli" \
