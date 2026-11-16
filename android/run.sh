@@ -56,6 +56,7 @@ process_one() {
         >"$log" 2>&1 </dev/null &
     pid=$!
     echo "$pid" >"$STATE/job.pid"
+    OWN_JOB=1
 
     local last_pct=-1 last_t=0 line pct msg now el eta
     while IFS= read -r line; do
@@ -74,6 +75,7 @@ process_one() {
     done < <(tail -n +1 -F --pid="$pid" "$log" 2>/dev/null)
     wait "$pid"; rc=$?
     rm -f "$STATE/job.pid"
+    OWN_JOB=0
     wait  # 백그라운드 알림 호출 정리
 
     el=$(( $(date +%s) - start ))
@@ -105,8 +107,16 @@ process_one() {
     return 1
 }
 
-# 터미널에서 Ctrl+C로 멈추면 백그라운드 작업도 같이 끝낸다
-trap 'bash "$AUTOSUB_DIR/android/cancel.sh"' INT TERM HUP
+# 터미널에서 Ctrl+C: 내 작업이 돌고 있으면 그것만 취소하고 끝낸다.
+# (대기 중에 누르면 앞 작업은 건드리지 않고 대기만 그만둔다)
+OWN_JOB=0
+on_interrupt() {
+    [ "$OWN_JOB" = 1 ] && bash "$AUTOSUB_DIR/android/cancel.sh"
+    have termux-wake-unlock && termux-wake-unlock
+    echo "중단했습니다"
+    exit 130
+}
+trap on_interrupt INT TERM HUP
 
 exec 9>"$STATE/lock"
 rc_all=0
