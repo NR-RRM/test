@@ -109,7 +109,7 @@ cd ~/autosub && git pull && bash android/setup-gpu.sh
 - 속도 비교:
   ```bash
   autosub-bench /sdcard/Download/test.mp4 --backend gpu                       # GPU
-  autosub-bench /sdcard/Download/test.mp4 --backend gpu --whisper-args "-nfa" # GPU, flash attention 끔
+  autosub-bench /sdcard/Download/test.mp4 --backend gpu --whisper-args=-nfa # GPU, flash attention 끔
   autosub-bench /sdcard/Download/test.mp4                                     # 기본(CPU)
   ```
 

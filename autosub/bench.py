@@ -64,6 +64,12 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--backend", choices=["auto", "gpu", "cpu"], help="Whisper 실행 장치")
     ap.add_argument("--whisper-model", help="Whisper 모델 파일 (models/ 아래 이름 또는 경로)")
     ap.add_argument("--whisper-args", default="", help='whisper-cli 추가 옵션, 예: "-nfa"')
+    # "--whisper-args -nfa" 처럼 값이 '-'로 시작해도 받도록 "--whisper-args=-nfa" 형태로 바꾼다
+    argv = list(argv)
+    for i in range(len(argv) - 1):
+        if argv[i] == "--whisper-args":
+            argv[i:i + 2] = [f"--whisper-args={argv[i + 1]}"]
+            break
     args = ap.parse_args(argv)
 
     cfg = load_config(Path(args.config) if args.config else None)
