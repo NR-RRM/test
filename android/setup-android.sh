@@ -34,11 +34,15 @@ else
 fi
 
 step "4/6 Ubuntu 설치 (proot-distro, 약 500MB)"
-if [ -d "$PREFIX/var/lib/proot-distro/installed-rootfs/$DISTRO" ]; then
+# 설치 여부는 실제로 들어가 보고 판단 (proot-distro 버전마다 설치 폴더 위치가 다름)
+if proot-distro login "$DISTRO" -- true </dev/null >/dev/null 2>&1; then
     echo "  이미 설치되어 있습니다"
-else
-    proot-distro install "$DISTRO"
+elif ! proot-distro install "$DISTRO"; then
+    # 예전에 설치하다 끊겨서 망가진 경우: 새로 설치
+    echo "  기존 Ubuntu가 제대로 동작하지 않아 다시 설치합니다"
+    proot-distro reset "$DISTRO"
 fi
+proot-distro login "$DISTRO" -- true </dev/null || { echo "!! Ubuntu 실행 실패. 이 화면을 캡처해서 보내 주세요."; exit 1; }
 
 step "5/6 Ubuntu 안에 엔진/모델 설치"
 proot-distro login "$DISTRO" --bind "$AUTOSUB_DIR:$AUTOSUB_DIR" -- \
