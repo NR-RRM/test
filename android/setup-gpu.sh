@@ -44,7 +44,7 @@ FEATS=$(grep -m1 '^Features' /proc/cpuinfo || true)
 ARCH="armv8.2-a+fp16"
 case " $FEATS " in *" asimddp "*) ARCH="$ARCH+dotprod" ;; esac
 case " $FEATS " in *" i8mm "*) ARCH="$ARCH+i8mm" ;; esac
-WANT="ref=$WHISPER_REF arch=$ARCH opencl=adreno"
+WANT="ref=$WHISPER_REF arch=$ARCH opencl=adreno patch=init-order"
 if [ -x "$DST/whisper-cli.bin" ] && [ "$(cat "$DST/BUILD_INFO" 2>/dev/null)" = "$WANT" ]; then
     echo "  이미 빌드되어 있습니다 ($WANT)"
 else
@@ -53,7 +53,9 @@ else
     else
         git -C "$SRC" fetch -q --depth 1 origin tag "$WHISPER_REF" && git -C "$SRC" checkout -q "$WHISPER_REF"
     fi
-    rm -rf "$SRC/build"
+    # ggml OpenCL 버그 수정 (초기화 전에 정렬값을 읽다가 충돌)
+    python "$AUTOSUB_DIR/android/patches/ggml_opencl_init_order.py" "$SRC" || fail "소스 패치 실패"
+    # 빌드 폴더는 남겨 둔다: 바뀐 파일만 다시 컴파일
     cmake -S "$SRC" -B "$SRC/build" -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
         -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF -DWHISPER_BUILD_EXAMPLES=ON \
         -DGGML_OPENMP=OFF -DGGML_NATIVE=OFF -DGGML_CPU_ARM_ARCH="$ARCH" \
