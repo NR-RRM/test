@@ -130,17 +130,17 @@ run_test "Termux 2회차(캐시)" "$DST/whisper-cli" || true
 run_test "Ubuntu 안에서" proot-distro login "$DISTRO" --bind "$AUTOSUB_DIR:$AUTOSUB_DIR" -- "$DST/whisper-cli" \
     || fail "Termux에서는 되지만 Ubuntu 안에서 호출하면 실패"
 
-step "5/5 설정 변경 (GPU 우선, 실패 시 CPU 자동 대체)"
+step "5/5 설정 저장 (GPU 빌드 등록. 기본 장치는 그대로: 폴드7에서 GPU가 CPU보다 3배 느렸음)"
 [ -f "$CONFIG_FILE" ] || cp "$AUTOSUB_DIR/android/config-android.default.json" "$CONFIG_FILE"
 in_ubuntu -- -c '
 import json, sys
 p = sys.argv[1]
 c = json.load(open(p, encoding="utf-8"))
 c.update(whisper_cli="engines/whisper-gpu/whisper-cli", whisper_cli_cpu="engines/whisper/whisper-cli",
-         whisper_backend="auto")
+         whisper_backend=c.get("whisper_backend", "cpu") if c.get("whisper_backend") in ("cpu", "gpu", "auto") else "cpu")
 json.dump(c, open(p, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
 print("  설정 저장:", p)
 ' "$CONFIG_FILE" || fail "설정 파일 수정 실패"
 echo
-echo "GPU 설정 완료! 속도 비교:  autosub-bench /sdcard/Download/test.mp4"
-echo "(CPU로 되돌리기:  autosub-bench ... --backend cpu  /  설정에서 \"whisper_backend\": \"cpu\")"
+echo "GPU 설정 완료! GPU로 속도 측정:  autosub-bench /sdcard/Download/test.mp4 --backend gpu"
+echo "(기본으로 GPU를 쓰려면 설정에서 \"whisper_backend\": \"auto\")"

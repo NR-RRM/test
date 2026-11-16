@@ -102,15 +102,17 @@ cd ~/autosub && git pull && bash android/setup-gpu.sh
 
 - Whisper를 폰의 그래픽 칩(Adreno 830)으로 돌립니다. Parakeet은 원래 빨라서 CPU 그대로입니다.
 - Ubuntu 안에서는 안드로이드 그래픽 드라이버를 쓸 수 없어서, Whisper만 Termux 쪽에서 따로 빌드합니다 (10~20분).
-- 끝에 시험 실행을 해서 성공해야만 GPU를 켭니다. GPU 실행이 도중에 실패하면 자동으로 CPU로 다시 처리합니다.
+- 끝에 시험 실행을 해서 성공하면 GPU 빌드를 등록합니다. **기본 장치는 바꾸지 않습니다.**
+  폴드7 측정에서 GPU가 CPU보다 약 3배 느렸기 때문입니다 (5분 샘플 Whisper: CPU 190초, GPU 586초).
+- `"whisper_backend": "auto"`로 바꾸면 GPU를 먼저 쓰고, 실패하면 자동으로 CPU로 다시 처리합니다.
 - 실패해도 지금처럼 CPU로 정상 동작합니다. 로그: `~/.autosub/logs/setup-gpu.log`
 - 속도 비교:
   ```bash
-  autosub-bench /sdcard/Download/test.mp4                  # GPU
-  autosub-bench /sdcard/Download/test.mp4 --backend cpu    # CPU
-  autosub-bench /sdcard/Download/test.mp4 --whisper-args "-nfa"   # GPU, flash attention 끔
+  autosub-bench /sdcard/Download/test.mp4 --backend gpu                       # GPU
+  autosub-bench /sdcard/Download/test.mp4 --backend gpu --whisper-args "-nfa" # GPU, flash attention 끔
+  autosub-bench /sdcard/Download/test.mp4                                     # 기본(CPU)
   ```
-- GPU를 끄려면 설정에서 `"whisper_backend": "cpu"`
+
 
 ## 설정 (`~/autosub/config-android.json`)
 
@@ -118,7 +120,7 @@ cd ~/autosub && git pull && bash android/setup-gpu.sh
 |---|---|---|
 | `engine_mode` | `both` | `both`(교차검증) / `parakeet` / `whisper`. 속도 측정 후 정합니다 |
 | `whisper_threads` / `parakeet_threads` | `8` | CPU 스레드 수 |
-| `whisper_backend` | `cpu` (GPU 설정 후 `auto`) | `auto`(GPU 먼저, 실패 시 CPU) / `gpu` / `cpu` |
+| `whisper_backend` | `cpu` | `auto`(GPU 먼저, 실패 시 CPU) / `gpu` / `cpu` |
 | `whisper_beam_size` | `5` | 폰에서는 `1`로 줄여도 빨라지지 않고 환각만 늘었음 |
 | `max_line_chars`, `max_cps` 등 | PC와 같음 | 자막 규칙 (PC 버전 README 참고) |
 
