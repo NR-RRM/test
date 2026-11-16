@@ -44,8 +44,11 @@ jobs:
         shell: pwsh
         working-directory: src
         run: |
-          .\build\bin\Release\whisper-cli.exe --help 2>&1 | Select-Object -First 5
-          if ($LASTEXITCODE -ne 0) { throw "whisper-cli 실행 실패" }
+          # --help는 종료코드 1을 돌려주므로 출력 내용으로 확인 (DLL 누락이면 출력 자체가 없음)
+          $out = (& .\build\bin\Release\whisper-cli.exe -h 2>&1 | Out-String)
+          $out.Substring(0, [Math]::Min(400, $out.Length))
+          if ($out -notmatch "output-json-full") { throw "whisper-cli 실행 실패" }
+          $global:LASTEXITCODE = 0
 
       - name: Collect
         shell: pwsh
