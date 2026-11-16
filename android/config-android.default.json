@@ -1,0 +1,12 @@
+{
+  "ffmpeg": "ffmpeg",
+  "whisper_cli": "engines/whisper/whisper-cli",
+  "whisper_model": "models/ggml-large-v3-turbo-q8_0.bin",
+  "parakeet_dir": "models/parakeet-tdt-0.6b-v2-int8",
+  "whisper_backend": "cpu",
+  "whisper_threads": 8,
+  "whisper_beam_size": 5,
+  "parakeet_threads": 8,
+  "engine_mode": "both",
+  "language": "en"
+}

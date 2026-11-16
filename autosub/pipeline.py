@@ -19,8 +19,8 @@ from .writers import write_review, write_srt
 ProgressFn = Callable[[Optional[float], Optional[str]], None]
 
 
-def output_paths(video: Path) -> tuple[Path, Path]:
-    stem = video.with_suffix("")
+def output_paths(video: Path, out_dir: Optional[Path] = None) -> tuple[Path, Path]:
+    stem = (Path(out_dir) / video.stem) if out_dir else video.with_suffix("")
     return Path(f"{stem}.en.srt"), Path(f"{stem}.review.txt")
 
 
@@ -44,18 +44,24 @@ def _tee_log(log: Callable[[str], None], video: Path) -> Callable[[str], None]:
 
 
 def run(video: Path, cfg: Config, log: Callable[[str], None], progress: ProgressFn,
-        cancel: CancelToken) -> tuple[Path, Path]:
+        cancel: CancelToken, out_dir: Optional[Path] = None) -> tuple[Path, Path]:
     t_start = time.time()
     video = video.resolve()
     log = _tee_log(log, video)
     if not video.exists():
         raise RuntimeError(f"파일이 없습니다: {video}")
-    srt_path, review_path = output_paths(video)
+    if out_dir:
+        Path(out_dir).mkdir(parents=True, exist_ok=True)
+    srt_path, review_path = output_paths(video, out_dir)
+    mode = cfg.mode()
+    use_wh, use_pk = mode in ("both", "whisper"), mode in ("both", "parakeet")
 
     # 단계별 가중치 (대략적인 소요 시간 비율)
-    stages = [("extract", 0.04), ("whisper", 0.60 if cfg.use_parakeet else 0.92)]
-    if cfg.use_parakeet:
-        stages.append(("parakeet", 0.32))
+    stages = [("extract", 0.04)]
+    if use_wh:
+        stages.append(("whisper", 0.60 if use_pk else 0.92))
+    if use_pk:
+        stages.append(("parakeet", 0.32 if use_wh else 0.92))
     stages.append(("finish", 0.04))
     total = sum(w for _, w in stages)
     base = {}
@@ -94,22 +100,32 @@ def run(video: Path, cfg: Config, log: Callable[[str], None], progress: Progress
         p(1.0, "오디오 추출 완료")
 
         # 2. Whisper
-        p = stage("whisper")
-        wh_words, backend = whisper_engine.transcribe(
-            Config.path(cfg.whisper_cli), Config.path(cfg.whisper_model), wav, tmp / "whisper",
-            cfg, log, cancel, p)
-        t_wh = time.time() - t_start
+        t_wh = t_pk = 0.0
+        backend = ""
+        wh_words = pk_words = None
+        if use_wh:
+            p = stage("whisper")
+            t0 = time.time()
+            wh_words, backend = whisper_engine.transcribe(
+                Config.path(cfg.whisper_cli), Config.path(cfg.whisper_model), wav, tmp / "whisper",
+                cfg, log, cancel, p)
+            t_wh = time.time() - t0
 
         # 3. Parakeet
         review: list[ReviewItem] = []
-        if cfg.use_parakeet:
+        if use_pk:
             p = stage("parakeet")
+            t0 = time.time()
             pk_words = parakeet_engine.transcribe(Config.path(cfg.parakeet_dir), audio,
                                                   cfg.parakeet_threads, log, cancel, p)
+            t_pk = time.time() - t0
             cancel.check()
+        if wh_words is not None and pk_words is not None:
             words = merge_mod.merge(wh_words, pk_words, review)
-        else:
+        elif wh_words is not None:
             words = merge_mod.whisper_only(wh_words, review)
+        else:
+            words = merge_mod.parakeet_only(pk_words, review)
 
         # 4. 자막 정리 및 저장
         p = stage("finish")
@@ -123,14 +139,21 @@ def run(video: Path, cfg: Config, log: Callable[[str], None], progress: Progress
         elapsed = time.time() - t_start
         info = {
             "영상 길이": fmt_ts(dur),
-            "처리 시간": f"{elapsed / 60:.1f}분 (Whisper {t_wh / 60:.1f}분, {backend})",
-            "Whisper 모델": Path(cfg.whisper_model).name,
-            "교차검증": "Parakeet-TDT 0.6B" if cfg.use_parakeet else "사용 안 함",
-            "자막 개수": str(len(cues)),
+            "처리 시간": f"{elapsed / 60:.1f}분" + "".join(
+                [f", Whisper {t_wh / 60:.1f}분 ({backend})" if use_wh else "",
+                 f", Parakeet {t_pk / 60:.1f}분" if use_pk else ""]),
+            "엔진": {"both": "Whisper + Parakeet 교차검증", "whisper": "Whisper 단독",
+                    "parakeet": "Parakeet-TDT 0.6B 단독"}[mode],
         }
+        if use_wh:
+            info["Whisper 모델"] = Path(cfg.whisper_model).name
+        info.update({
+            "자막 개수": str(len(cues)),
+        })
         write_review(review, review_path, video, info)
         p(1.0, "완료")
         log(f"완료: {srt_path.name} (자막 {len(cues)}개, 검수 항목 {len(review)}건, {elapsed / 60:.1f}분)")
+        log(f"TIMING total={elapsed:.1f} whisper={t_wh:.1f} parakeet={t_pk:.1f} audio={dur:.1f} mode={mode}")
         return srt_path, review_path
     finally:
         if cfg.keep_temp:

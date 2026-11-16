@@ -116,6 +116,12 @@ def whisper_only(words: list[Word], review: list[ReviewItem]) -> list[Word]:
     return words
 
 
+def parakeet_only(words: list[Word], review: list[ReviewItem]) -> list[Word]:
+    """Parakeet 단독 모드: Parakeet은 반복 환각이 거의 없지만 같은 정리 과정을 거친다."""
+    words = trim_runaway(_clean(words), review)
+    return make_monotonic(words)
+
+
 def merge(wh: list[Word], pk: list[Word], review: list[ReviewItem]) -> list[Word]:
     wh = collapse_repeats(trim_runaway(_clean(wh), review), review)
     pk = _clean(pk)

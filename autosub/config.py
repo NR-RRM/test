@@ -25,6 +25,7 @@ class Config:
     language: str = "en"
     audio_track: int = -1               # -1: 영어 트랙 자동 선택, 0 이상: 해당 번호 고정
     use_parakeet: bool = True           # 교차검증
+    engine_mode: str = ""               # ""(use_parakeet 따름) | both | whisper | parakeet(Parakeet 단독)
     parakeet_threads: int = 4
 
     # 자막 규칙
@@ -40,6 +41,13 @@ class Config:
     # 출력
     keep_temp: bool = False
 
+    def mode(self) -> str:
+        """실제 사용할 엔진 조합: both | whisper | parakeet"""
+        m = (self.engine_mode or "").strip().lower()
+        if m in ("both", "whisper", "parakeet"):
+            return m
+        return "both" if self.use_parakeet else "whisper"
+
     @staticmethod
     def path(p: str) -> Path:
         """상대경로는 프로그램 폴더 기준. 'ffmpeg'처럼 이름만 있으면 PATH에서 찾는다."""
@@ -52,13 +60,15 @@ class Config:
         return Path(found) if found else q
 
 
-CONFIG_FILE = ROOT / "config.json"
+# AUTOSUB_CONFIG 환경변수로 다른 설정 파일 사용 가능 (안드로이드용 config-android.json 등)
+CONFIG_FILE = Path(os.environ.get("AUTOSUB_CONFIG") or ROOT / "config.json")
 
 
-def load_config() -> Config:
+def load_config(path: Path | None = None) -> Config:
     cfg = Config()
-    if CONFIG_FILE.exists():
-        data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+    path = Path(path) if path else CONFIG_FILE
+    if path.exists():
+        data = json.loads(path.read_text(encoding="utf-8"))
         names = {f.name for f in fields(Config)}
         for k, v in data.items():
             if k in names:
