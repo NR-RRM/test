@@ -8,6 +8,8 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import shutil
+import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
@@ -187,6 +189,19 @@ def parse_args(argv=None) -> WatchConfig:
     )
 
 
+def default_notify(msg: str) -> None:
+    """터미널 출력 + (Android Termux 에서 termux-api 가 있으면) 폰 알림/진동."""
+    print(msg, flush=True)
+    if shutil.which("termux-notification"):
+        try:
+            subprocess.run(["termux-notification", "--title", "코레일 예약 성공",
+                            "--content", "결제 기한 안에 코레일톡 앱에서 결제하세요",
+                            "--priority", "high", "--sound", "--vibrate", "500,300,500"],
+                           timeout=10, check=False)
+        except Exception as e:  # 알림 실패해도 예약은 이미 된 상태
+            log.warning("알림 실패: %s", e)
+
+
 def main(argv=None):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
     cfg = parse_args(argv)
@@ -198,7 +213,7 @@ def main(argv=None):
     client = Korail(korail_id, korail_pw)
     if not client.logined:
         sys.exit("로그인 실패: 아이디/비밀번호를 확인하세요.")
-    rsv = Watcher(client, cfg, passengers=build_passengers(cfg)).run()
+    rsv = Watcher(client, cfg, notify=default_notify, passengers=build_passengers(cfg)).run()
     sys.exit(0 if rsv else 1)
 
 

@@ -5,14 +5,39 @@
 (앱 > 승차권 예약내역, 결제 기한이 지나면 자동 취소).
 
 > 코레일톡 앱 화면을 직접 조작하는 방식이 아니라, 앱이 쓰는 서버 API를
-> 호출하는 [`korail2`](https://github.com/carpedm20/korail2) 라이브러리를 사용합니다.
+> 호출하는 [`korail2`](https://github.com/carpedm20/korail2) 라이브러리(BSD, `korail2/` 폴더에 포함)를 사용합니다.
 
-## 설치
+## 안드로이드 폰에서 쓰기 (Termux)
 
-`korail2` 0.4.0은 Python 3.12 이상에서 빌드되지 않으므로 **Python 3.11 이하**를 쓰세요.
+1. **F-Droid**(https://f-droid.org)에서 **Termux**와 **Termux:API** 앱을 설치합니다.
+   Play 스토어 버전 Termux는 오래돼서 `pkg` 설치가 깨질 수 있습니다.
+2. Termux를 열고 실행합니다.
+   ```bash
+   pkg install -y git
+   git clone -b ccr-07f2b757-e2te0f https://github.com/nr-rrm/test.git korail
+   cd korail
+   bash termux_setup.sh      # 처음 한 번만. 끝에 코레일 아이디/비번을 물어봅니다
+   ```
+3. 실행합니다.
+   ```bash
+   cd ~/korail
+   ./korail.sh 서울 부산 20261224 --from 08:00 --to 10:30 --max-attempts 1   # 먼저 1회 테스트
+   ./korail.sh 서울 부산 20261224 --from 08:00 --to 10:30                    # 실제 실행
+   ```
+4. 예약에 성공하면 **진동과 함께 알림**이 옵니다. 바로 코레일톡 앱에서 결제하세요.
+
+팁
+- `korail.sh`가 wake-lock을 걸어 주므로 화면을 꺼도 계속 돕니다. 그래도 멈추면
+  설정 > 앱 > Termux > 배터리 > **제한 없음**으로 바꾸세요.
+- 다른 앱을 써도 상관없지만, 최근 앱 목록에서 Termux를 쓸어서 닫으면 멈춥니다.
+- 멈추려면 Termux 화면에서 볼륨다운+C(= Ctrl+C)를 누르세요.
+
+## PC에서 쓰기
+
+Python 3.9 이상이면 됩니다.
 
 ```bash
-python3.11 -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate   # 윈도우: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
